@@ -201,3 +201,51 @@ def test_openrouter_key_check_reads_the_free_allowance(tmp_path):
     client._client = httpx.AsyncClient(base_url=client.BASE, transport=httpx.MockTransport(handler))
     assert asyncio.run(client.list_models("sk-or-test")) == ["google/gemma-4-31b-it:free"]
     assert "42 su 50" in " ".join(tracker.lines("openrouter"))
+
+
+class Retired:
+    usage = None
+
+    async def chat(self, messages, *, models, **kwargs):
+        from ressy.brain.groq import GroqError
+        raise GroqError("This model is no longer available to new users.", status=404, provider="Gemini")
+
+
+def test_router_moves_on_when_a_model_is_retired(settings, tmp_path):
+    settings.llm_provider = "gemini"
+    settings.gemini_api_key = "AIza_test"
+    settings.groq_api_key = "gsk_test"
+    router = LLMRouter(settings, usage=UsageTracker(tmp_path / "u.json"))
+    router.gemini, router.groq = Retired(), Answers()
+    result = asyncio.run(router.chat([{"role": "user", "content": "ciao"}]))
+    assert result.message["content"] == "dalla riserva"
+
+
+def test_gemini_thought_signature_goes_back_to_gemini_only():
+    from ressy.brain.providers import GeminiClient
+
+    call = {"id": "c", "type": "function", "function": {"name": "open_app", "arguments": "{}"},
+            "extra_content": {"google": {"thought_signature": "sig"}}}
+    message = {"role": "assistant", "tool_calls": [call], "_claude": ["x"]}
+    to_gemini = GeminiClient(lambda: "k")._outgoing(message)
+    to_groq = GroqClient(lambda: "k")._outgoing(message)
+    assert to_gemini["tool_calls"][0]["extra_content"]["google"]["thought_signature"] == "sig"
+    assert "extra_content" not in to_groq["tool_calls"][0] and "_claude" not in to_groq
+
+
+def test_retired_gemini_models_are_migrated():
+    from ressy.config import Settings
+
+    s = Settings(gemini_model="gemini-2.5-flash")
+    s._sanitize()
+    assert s.gemini_model == "gemini-flash-latest"
+
+
+def test_quick_reminder_and_maths():
+    assert quick.match("Ricordami tra 10 minuti di chiamare Marco.").args == {
+        "action": "add", "text": "Chiamare Marco", "minutes": 10.0}
+    assert quick.match("ricordami fra mezz'ora di spegnere il forno").args["minutes"] == 30
+    assert quick.match("ricordami di comprare il latte") is None
+    assert quick.match("Quanto fa 12 per 7?").answer == "Fa 84."
+    assert quick.match("calcola 3,5 + 2").answer == "Fa 5,5."
+    assert quick.match("quanto fa 4 diviso 0").answer == "Non si può dividere per zero."

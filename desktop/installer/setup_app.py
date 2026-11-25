@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -303,6 +304,18 @@ class Setup(Backdrop):
         self.current = "welcome"
         self._show("welcome")
 
+    @staticmethod
+    def _scrolling(page: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+        page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        scroll.setWidget(page)
+        scroll.viewport().setAutoFillBackground(False)
+        return scroll
+
     def _add(self, key: str, page: QWidget) -> None:
         self.page_index[key] = self.pages.addWidget(page)
 
@@ -378,10 +391,11 @@ class Setup(Backdrop):
              "openrouter": s.openrouter_api_key},
             {"groq": s.llm_model, "claude": s.claude_model, "gemini": s.gemini_model,
              "openrouter": s.openrouter_model or "auto"},
+            s.local_llm_model,
         )
         v.addWidget(self.brain)
         v.addStretch(1)
-        self._add("brain", page)
+        self._add("brain", self._scrolling(page))
 
     def _build_voice(self) -> None:
         page, v = self._page(

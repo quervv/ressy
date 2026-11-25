@@ -463,6 +463,7 @@ class SettingsDialog(QDialog):
              "openrouter": s.openrouter_api_key},
             {"groq": s.llm_model, "claude": s.claude_model, "gemini": s.gemini_model,
              "openrouter": s.openrouter_model or "auto"},
+            s.local_llm_model,
         )
         self.fallback.setChecked(s.llm_fallback)
         self.quick.setChecked(s.quick_commands)

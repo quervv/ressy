@@ -23,6 +23,7 @@ class Quick:
 
 def _clean(text: str) -> str:
     low = strip_accents((text or "").casefold()).strip()
+    low = re.sub(r"(\d)[,.](\d)", r"\1.\2", low)
     low = re.sub(r"[!?¿¡;,:\"«»]+", " ", low)
     low = re.sub(r"\.(\s|$)", " ", low)
     low = re.sub(r"\s+", " ", low).strip()
@@ -84,6 +85,20 @@ def match(text: str) -> Quick | None:
         today = dt.date.today()
         return Quick(answer=f"Oggi è {_DAYS[today.weekday()]} {today.day} {_MONTHS[today.month - 1]} {today.year}.")
 
+    math = _MATH.fullmatch(t)
+    if math:
+        answer = _calculate(math.group(1), math.group(2), math.group(3))
+        if answer:
+            return Quick(answer=answer)
+
+    reminder = _REMINDER.fullmatch(t)
+    if reminder:
+        amount = _amount(reminder.group(1))
+        if amount:
+            minutes = amount * (60 if reminder.group(2).startswith("or") else 1)
+            text = _as_said(text, reminder.group(3).strip())
+            return Quick("reminder", {"action": "add", "text": text[:1].upper() + text[1:], "minutes": minutes})
+
     if _USAGE.search(t):
         return Quick(special="usage")
 
@@ -133,6 +148,36 @@ def match(text: str) -> Quick | None:
     if closed and not _NOT_AN_APP.search(closed.group(1)) and len(closed.group(1).split()) <= 4:
         return Quick("close_app", {"name": closed.group(1).strip()})
     return None
+
+
+_NUM = r"(-?\d+(?:[.,]\d+)?)"
+_MATH = re.compile(rf"(?:quanto fa|quanto e|calcola|fammi)\s+{_NUM}\s*(per|x|\*|piu|\+|meno|-|diviso|/|:)\s*{_NUM}")
+_OPS = {"per": "*", "x": "*", "*": "*", "piu": "+", "+": "+", "meno": "-", "-": "-", "diviso": "/", "/": "/", ":": "/"}
+
+
+_REMINDER = re.compile(r"(?:ricordami|ricordarmi|fammi ricordare)\s+(?:tra|fra)\s+(\d+|un|una|mezz|due|tre|cinque|dieci|"
+                       r"quindici|venti|trenta)\s*'?\s*(minut[oi]|or[ae])\s+(?:di|che|del|della|dello|il|la|lo)?\s*(.{2,})")
+_WORDS = {"un": 1, "una": 1, "mezz": 0.5, "due": 2, "tre": 3, "cinque": 5, "dieci": 10, "quindici": 15, "venti": 20,
+          "trenta": 30}
+
+
+def _as_said(original: str, cleaned: str) -> str:
+    tail = re.sub(r"[.!?\s]+$", "", original or "")[-len(cleaned):]
+    return tail if strip_accents(tail.casefold()) == cleaned else cleaned
+
+
+def _amount(word: str) -> float:
+    return float(word) if word.isdigit() else _WORDS.get(word, 0)
+
+
+def _calculate(a: str, op: str, b: str) -> str:
+    x, y = float(a.replace(",", ".")), float(b.replace(",", "."))
+    sign = _OPS[op]
+    if sign == "/" and y == 0:
+        return "Non si può dividere per zero."
+    value = {"*": x * y, "+": x + y, "-": x - y, "/": x / y if y else 0}[sign]
+    text = f"{value:.4f}".rstrip("0").rstrip(".").replace(".", ",")
+    return f"Fa {text}."
 
 
 def spoken(tool: str, outcome: str) -> str:

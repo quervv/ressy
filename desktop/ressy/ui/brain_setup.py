@@ -20,13 +20,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import CLAUDE_MODELS, LOCAL_STT_MODELS, PROVIDER_NAMES
+from ..config import CLAUDE_MODELS, DEFAULT_LOCAL_LLM_MODEL, LOCAL_LLM_MODELS, LOCAL_STT_MODELS, PROVIDER_NAMES
 from ..paths import resource_path
 from . import theme
 
 PROVIDERS: dict[str, dict[str, Any]] = {
     "groq": {
-        "tagline": "Velocissimo. Piano gratuito, con limiti al minuto.",
+        "tagline": "Velocissimo, con piano gratuito.",
         "badge": "Gratis",
         "placeholder": "gsk_…",
         "url": "https://console.groq.com/keys",
@@ -38,19 +38,19 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         ],
     },
     "gemini": {
-        "tagline": "Di Google. Piano gratuito generoso, capisce anche la voce.",
+        "tagline": "Di Google, piano gratuito generoso.",
         "badge": "Gratis",
         "placeholder": "AIza…",
         "url": "https://aistudio.google.com/apikey",
         "site": "aistudio.google.com",
         "models": [
-            ("gemini-2.5-flash", "Gemini 2.5 Flash (consigliato)"),
-            ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite (più veloce)"),
-            ("gemini-2.5-pro", "Gemini 2.5 Pro (più capace, più lento)"),
+            ("gemini-flash-latest", "Gemini Flash, sempre l'ultimo (consigliato)"),
+            ("gemini-flash-lite-latest", "Gemini Flash-Lite (più veloce)"),
+            ("gemini-pro-latest", "Gemini Pro (più capace, più lento)"),
         ],
     },
     "openrouter": {
-        "tagline": "Una chiave, tanti modelli gratuiti. Ottima come riserva.",
+        "tagline": "Tanti modelli gratis: ottima riserva.",
         "badge": "Gratis",
         "placeholder": "sk-or-v1-…",
         "url": "https://openrouter.ai/settings/keys",
@@ -58,13 +58,26 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "models": [("auto", "Il miglior modello gratis del giorno (automatico)")],
     },
     "claude": {
-        "tagline": "Il più bravo a usare il PC. A consumo, con la tua carta.",
+        "tagline": "Il più capace. A consumo, a pagamento.",
         "badge": "Il più capace",
         "placeholder": "sk-ant-…",
         "url": "https://console.anthropic.com/settings/keys",
         "site": "console.anthropic.com",
         "models": list(CLAUDE_MODELS.items()),
     },
+    "local": {
+        "tagline": "Gratis e offline, scaricata sul PC.",
+        "badge": "Senza chiave",
+        "placeholder": "",
+        "url": "",
+        "site": "",
+        "models": [],
+    },
+}
+LOCAL_AI_DETAILS = {
+    "": ("Nessuna", "Solo le chiavi online"),
+    "qwen2.5-0.5b": ("Leggera", "Meno di 500 MB: apre app, siti, musica, meteo"),
+    "qwen2.5-1.5b": ("Consigliata", "Capisce meglio le richieste lunghe, 1-2 secondi"),
 }
 
 SPEECH_OPTIONS = {
@@ -294,10 +307,11 @@ class BrainSetup(QWidget):
         self.relay.verified.connect(self._on_verified)
 
         cards = [
-            ChoiceCard(name, PROVIDER_NAMES[name], info["tagline"], logo=name, badge=info["badge"])
+            ChoiceCard(name, PROVIDER_NAMES[name], info["tagline"], logo="pc" if name == "local" else name,
+                       badge=info["badge"])
             for name, info in PROVIDERS.items()
         ]
-        self.cards = CardRow(cards, columns=2)
+        self.cards = CardRow(cards, columns=3)
         self.cards.changed.connect(self._switch)
 
         self.key_hint = _hint("")
@@ -322,7 +336,9 @@ class BrainSetup(QWidget):
         self.model = QComboBox()
         self.model.currentIndexChanged.connect(self._model_changed)
 
-        form = QGridLayout()
+        self.key_box = QWidget()
+        form = QGridLayout(self.key_box)
+        form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
         self.key_label = QLabel("Chiave API")
@@ -338,13 +354,18 @@ class BrainSetup(QWidget):
         layout.setSpacing(14)
         layout.addWidget(self.cards)
         layout.addWidget(self.key_hint)
-        layout.addLayout(form)
-        layout.addWidget(_hint(
+        layout.addWidget(self.key_box)
+        self.keys_hint = _hint(
             "Puoi inserire <b>più chiavi</b>: scegli una scheda, incolla la chiave, poi torna su quella che vuoi "
-            "usare. Se la prima arriva al limite, Ressy continua con le altre, così resta sempre gratis."
-        ))
+            "usare. Se la prima arriva al limite, Ressy continua con le altre."
+        )
+        layout.addWidget(self.keys_hint)
+        self.local_ai = LocalAISetup()
+        self.local_ai.readiness.connect(self._local_changed)
+        layout.addWidget(self.local_ai)
 
-    def load(self, provider: str, keys: dict[str, str], models: dict[str, str]) -> None:
+    def load(self, provider: str, keys: dict[str, str], models: dict[str, str], local_model: str = "") -> None:
+        self.local_ai.load(local_model)
         self.keys.update({k: v or "" for k, v in keys.items()})
         self.models.update({k: v or "" for k, v in models.items()})
         self._current = provider
@@ -374,29 +395,39 @@ class BrainSetup(QWidget):
             "gemini_model": self.models["gemini"] or PROVIDERS["gemini"]["models"][0][0],
             "openrouter_api_key": self.keys["openrouter"].strip(),
             "openrouter_model": "" if self.models["openrouter"] in ("", "auto") else self.models["openrouter"],
+            "local_llm_model": self.local_ai.value(),
         }
 
     def problem(self) -> str:
         self._remember()
         provider = self.provider()
+        if provider == "local":
+            return self.local_ai.problem(required=True)
         if not self.keys[provider].strip():
             return f"Incolla la chiave API di {PROVIDER_NAMES[provider]} (è gratis crearla)."
-        return ""
+        return self.local_ai.problem(required=False)
 
     def focus_key(self) -> None:
         self.key.setFocus()
 
     def is_verified(self) -> bool:
         provider = self.provider()
+        if provider == "local":
+            return self.local_ai.is_ready()
         key = (self.keys.get(provider) or "").strip()
         return bool(key) and self._verified.get(provider) == key
 
     def verify_if_needed(self) -> None:
         self._remember()
+        if self.provider() == "local":
+            return
         if self.keys[self.provider()].strip() and not self.is_verified() and self._checking is None:
             self.verify()
 
     def _remember(self) -> None:
+        if self._current == "local":
+            self._mark_keys()
+            return
         self.keys[self._current] = self.key.text().strip()
         if self.model.currentData():
             self.models[self._current] = self.model.currentData()
@@ -404,8 +435,12 @@ class BrainSetup(QWidget):
 
     def _mark_keys(self) -> None:
         for name, card in self.cards.cards.items():
-            has = bool((self.keys.get(name) or "").strip())
-            status = "Chiave inserita" if has else ""
+            if name == "local":
+                has = self.local_ai.is_ready()
+                status = "Scaricata" if has else ""
+            else:
+                has = bool((self.keys.get(name) or "").strip())
+                status = "Chiave inserita" if has else ""
             if card.status != status:
                 card.status, card.status_ok = status, has
                 card.update()
@@ -420,7 +455,23 @@ class BrainSetup(QWidget):
         if self.auto_verify:
             self.verify_if_needed()
 
+    def _local_changed(self, _ready: bool) -> None:
+        self._mark_keys()
+        self.validity.emit(self.is_verified())
+
     def _show(self, provider: str) -> None:
+        local = provider == "local"
+        self.key_box.setVisible(not local)
+        self.keys_hint.setVisible(not local)
+        self.local_ai.set_required(local)
+        if local:
+            self.key.setText("")
+            self.key_hint.setText(
+                "Ressy pensa con un'AI scaricata su questo PC: gratis, senza chiave e anche senza internet. "
+                "È meno brava dei servizi online, ma per aprire app, siti, musica e meteo basta."
+            )
+            self._set_status("", "")
+            return
         info = PROVIDERS[provider]
         name = PROVIDER_NAMES[provider]
         self.key_label.setText(f"Chiave {name}")
@@ -515,6 +566,177 @@ class BrainSetup(QWidget):
         self._set_status("ok", "Chiave valida.")
         self._fill_models(provider)
         self.validity.emit(self.is_verified())
+
+
+class LocalAISetup(QWidget):
+
+    readiness = Signal(bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        from ..brain import local_llm
+
+        self._llm = local_llm
+        self._required = False
+        self._cancel: threading.Event | None = None
+        self._downloading = ""
+        self.relay = _Relay()
+        self.relay.progress.connect(self._on_progress)
+        self.relay.downloaded.connect(self._on_downloaded)
+
+        self.title = QLabel()
+        self.title.setObjectName("section")
+        cards = []
+        for name, (label, detail) in LOCAL_AI_DETAILS.items():
+            size = f" · {self._size_text(LOCAL_LLM_MODELS[name][1])}" if name else ""
+            cards.append(ChoiceCard(name or "none", f"{label}{size}", detail, compact=True))
+        self.sizes = CardRow(cards)
+        self.sizes.changed.connect(lambda _: self._refresh())
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self.download_button = QPushButton("Scarica")
+        self.download_button.setObjectName("primary")
+        self.download_button.clicked.connect(self._download_clicked)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 1000)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(8)
+        self.status = QLabel()
+        self.status.setObjectName("hint")
+        self.status.setWordWrap(True)
+        col = QVBoxLayout()
+        col.setSpacing(6)
+        col.addWidget(self.status)
+        col.addWidget(self.bar)
+        row.addWidget(self.download_button)
+        row.addLayout(col, 1)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 6, 0, 0)
+        layout.setSpacing(10)
+        layout.addWidget(self.title)
+        layout.addWidget(self.sizes)
+        layout.addLayout(row)
+        self.set_required(False)
+
+    @staticmethod
+    def _size_text(mb: int) -> str:
+        return f"{mb / 1000:.1f} GB".replace(".", ",") if mb >= 1000 else f"{mb} MB"
+
+    def load(self, model: str) -> None:
+        self.sizes.set_value(model or "none")
+        self._refresh()
+
+    def value(self) -> str:
+        key = self.sizes.value()
+        return "" if key == "none" else key
+
+    def set_required(self, required: bool) -> None:
+        self._required = required
+        self.title.setText("SCEGLI L'AI SUL PC" if required else "RISERVA GRATUITA SUL PC (FACOLTATIVA)")
+        self.sizes.cards["none"].setVisible(not required)
+        if required and self.sizes.value() == "none":
+            self.sizes.set_value(DEFAULT_LOCAL_LLM_MODEL)
+        self._refresh()
+
+    def is_ready(self) -> bool:
+        name = self.value()
+        return bool(name) and not self._downloading and self._llm.is_downloaded(name)
+
+    def problem(self, *, required: bool) -> str:
+        if self._downloading:
+            return "Aspetta che finisca il download dell'AI sul PC."
+        name = self.value()
+        if not name:
+            return "Scegli quale AI scaricare sul PC." if required else ""
+        if not self._llm.is_downloaded(name):
+            return "Scarica l'AI sul PC (pulsante «Scarica»)" + ("." if required else ", oppure scegli «Nessuna».")
+        return ""
+
+    def _refresh(self) -> None:
+        for name, card in self.sizes.cards.items():
+            if name == "none":
+                continue
+            if self._downloading == name:
+                card.set_status("Download in corso…")
+            elif self._llm.is_downloaded(name):
+                card.set_status("Scaricata", ok=True)
+            else:
+                card.set_status("Da scaricare")
+        name = self.value()
+        if self._downloading:
+            self.download_button.setText("Annulla")
+            self.download_button.setObjectName("")
+            self.download_button.show()
+            self.bar.show()
+        elif not name:
+            self.download_button.hide()
+            self.bar.hide()
+            self.status.setText("Se tutte le chiavi sono al limite Ressy aspetta che si ricarichino.")
+        elif self._llm.is_downloaded(name):
+            self.download_button.hide()
+            self.bar.hide()
+            self.status.setText(f"<span style='color:{theme.BACKLIGHT}'>AI sul PC pronta</span>: "
+                                "si accende solo quando serve e si spegne da sola dopo 10 minuti.")
+        else:
+            mb = self._llm.download_size_mb(name)
+            self.download_button.show()
+            self.download_button.setText(f"Scarica ({self._size_text(mb)})")
+            self.download_button.setObjectName("primary")
+            self.bar.hide()
+            self.status.setText("Si scarica una volta: il modello Qwen 2.5 (Apache 2.0) e il motore llama.cpp "
+                                "ufficiale. Servono circa 2 GB di RAM libera quando è accesa.")
+        self.download_button.style().unpolish(self.download_button)
+        self.download_button.style().polish(self.download_button)
+        self.readiness.emit(self.is_ready())
+
+    def _download_clicked(self) -> None:
+        if self._downloading and self._cancel is not None:
+            self._cancel.set()
+            return
+        if self.value():
+            self.start_download(self.value())
+
+    def start_download(self, name: str) -> None:
+        self._downloading = name
+        self._cancel = threading.Event()
+        cancel = self._cancel
+        self.bar.setValue(0)
+        self.status.setText("Scarico l'AI sul PC…")
+        self._refresh()
+
+        def work() -> None:
+            from ..speech.local_stt import DownloadCancelled
+
+            try:
+                self._llm.download(name, lambda d, t: self.relay.progress.emit(name, d, t), cancel)
+                self.relay.downloaded.emit(name, "")
+            except DownloadCancelled:
+                self.relay.downloaded.emit(name, "cancelled")
+            except Exception as exc:
+                self.relay.downloaded.emit(name, str(exc) or type(exc).__name__)
+
+        threading.Thread(target=work, name="ressy-ai-download", daemon=True).start()
+
+    def cancel_download(self) -> None:
+        if self._cancel is not None:
+            self._cancel.set()
+
+    def _on_progress(self, name: str, done: int, total: int) -> None:
+        if name != self._downloading:
+            return
+        self.bar.setValue(int(1000 * done / max(1, total)))
+        self.status.setText(f"Scarico l'AI sul PC… {done / 1e6:.0f} di {total / 1e6:.0f} MB")
+
+    def _on_downloaded(self, name: str, error: str) -> None:
+        self._downloading = ""
+        self._refresh()
+        if error == "cancelled":
+            self.status.setText("Download annullato.")
+        elif error:
+            self.status.setText("<span style='color:#FF8C73'>Download non riuscito</span>: "
+                                "controlla la connessione e riprova.")
 
 
 class SpeechSetup(QWidget):

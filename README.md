@@ -5,7 +5,8 @@ Ressy è un assistente vocale per Windows. Tieni premuto **K**, di' **«Ressy, s
 - Sito: https://ressy.top
 - Licenza: MIT, gratis e open source.
 - Intelligenza: Groq, Gemini, OpenRouter (modelli gratuiti) o Claude, con la **tua** chiave API. Puoi inserirne più di una: se la prima arriva al limite Ressy continua con le altre.
-- Comandi semplici (apri app e siti, meteo, volume, musica, ora) eseguiti sul PC senza usare richieste AI.
+- Comandi semplici (apri app e siti, meteo, volume, musica, ora, promemoria, calcoli) eseguiti sul PC senza usare richieste AI.
+- AI sul PC (facoltativa): un modello Qwen 2.5 (Apache 2.0, 491 MB o 1,1 GB) eseguito dal motore ufficiale llama.cpp, scaricato alla prima scelta in `%APPDATA%\Ressy`. Gratis, offline e senza chiave: può essere il cervello principale o l'ultima riserva quando tutte le chiavi sono al limite. Gira solo su 127.0.0.1 e si spegne dopo 10 minuti di inattività.
 - Consumi: chiedi «quanto mi resta delle API?» o guarda Impostazioni › Intelligenza › Consumi delle chiavi.
 - Nessun bot condiviso: ognuno crea il proprio. Gira dentro Ressy sul PC, oppure su un tuo server (self-host).
 
@@ -50,7 +51,7 @@ Perché un bot a testa: un bot unico per tutti sarebbe un punto unico da cui pas
 
 ## Installare (utenti)
 
-1. Scarica **`Ressy-Setup.exe`** da https://ressy.top e aprilo. Si installa in `%LOCALAPPDATA%\Programs\Ressy`, solo per il tuo utente, senza permessi da amministratore.
+1. Scarica **`Ressy-Setup.exe`** dalle [release](https://github.com/quervv/ressy/releases/latest) e aprilo. Si installa in `%LOCALAPPDATA%\Programs\Ressy`, solo per il tuo utente, senza permessi da amministratore.
    - L'app non è firmata digitalmente: se compare «Windows ha protetto il PC», scegli «Ulteriori informazioni» → «Esegui comunque».
    - Nell'installer scegli cosa installare (Ressy, Ressy Server o entrambi), la cartella, il collegamento sul desktop e l'avvio con Windows.
    - Poi scegli come raggiungere Ressy da Telegram/Discord (vedi sopra) e incolli il token del tuo bot.

@@ -36,7 +36,7 @@ class GeminiClient(GroqClient):
     NATIVE = "https://generativelanguage.googleapis.com/v1beta"
 
     def params_for(self, model: str) -> dict[str, Any]:
-        return {"reasoning_effort": "low"} if "2.5" in model or "3" in model else {}
+        return {"reasoning_effort": "low"} if "flash" in model or "2.5" in model or "3" in model else {}
 
     def _key(self, key: str | None = None) -> str:
         key = (key if key is not None else self._api_key() or "").strip()
@@ -73,7 +73,7 @@ class GeminiClient(GroqClient):
         parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
         return "".join(str(p.get("text") or "") for p in parts).strip()
 
-    async def web_answer(self, question: str, *, language: str = "it", model: str = "gemini-2.5-flash") -> str:
+    async def web_answer(self, question: str, *, language: str = "it", model: str = "gemini-flash-latest") -> str:
         data = await self._native(
             model,
             {
@@ -463,7 +463,7 @@ class LLMRouter:
         if provider == "claude":
             return [self.settings.claude_model]
         if provider == "gemini":
-            ordered = [self.settings.gemini_model, "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+            ordered = [self.settings.gemini_model, "gemini-flash-latest", "gemini-flash-lite-latest"]
             return list(dict.fromkeys(m for m in ordered if m))
         if provider == "openrouter":
             return [self.settings.openrouter_model] if self.settings.openrouter_model else ["auto"]
@@ -500,8 +500,7 @@ class LLMRouter:
                 last = exc
                 continue
             except GroqError as exc:
-                if exc.status is not None and exc.status < 500 and exc.status != 429:
-                    raise
+                log.warning("%s failed (%s), trying the next brain", provider, exc)
                 last = exc
                 continue
             if provider != self.last_provider:

@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import re
 import logging
 import os
 import secrets
@@ -38,7 +39,7 @@ LOCAL_TOOLS = (
     "weather", "take_screenshot", "system_status", "reminder", "create_folder", "open_folder", "list_windows",
     "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer",
 )
-_MAX_HISTORY = 6
+_MAX_HISTORY = 2
 
 Progress = Callable[[int, int], None]
 
@@ -160,29 +161,50 @@ def _tool_line(schema: dict[str, Any]) -> str:
     return f"- {fn.get('name')}({', '.join(args)}): {description}"
 
 
+_EXAMPLES = (
+    ("apri spotify", {"azione": "open_app", "argomenti": {"name": "Spotify"}, "risposta": ""}),
+    ("metti lofi su youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
+    ("che tempo fa a Torino?", {"azione": "weather", "argomenti": {"city": "Torino"}, "risposta": ""}),
+    ("come stai?", {"azione": "rispondi", "argomenti": {}, "risposta": "Benissimo, grazie! Cosa faccio per te?"}),
+)
+
+
 def build_prompt(tools: list[dict[str, Any]], user_name: str = "") -> str:
     who = f" di {user_name}" if user_name else ""
     lines = "\n".join(_tool_line(t) for t in tools)
+    names = {(t.get("function") or {}).get("name") for t in tools}
+    examples = "\n".join(
+        f"Utente: {said}\nTu: {json.dumps(answer, ensure_ascii=False)}"
+        for said, answer in _EXAMPLES if answer["azione"] in names or answer["azione"] == "rispondi"
+    )
     return (
-        f"Sei Ressy, l'assistente vocale sul PC{who}. Parli italiano, frasi brevi (al massimo due).\n"
-        "Per ogni messaggio scegli UNA azione: uno degli strumenti qui sotto, oppure \"rispondi\" per parlare.\n"
-        "Dopo che uno strumento ha funzionato, usa \"rispondi\" per dire in breve cosa hai fatto.\n"
-        "Non inventare risultati: se serve un'informazione aggiornata usa web_answer o weather.\n"
-        "Rispondi solo con JSON: {\"azione\": ..., \"argomenti\": {...}, \"risposta\": \"...\"}.\n\n"
-        f"Strumenti:\n{lines}"
+        f"Sei Ressy, l'assistente vocale sul PC{who}. Parli italiano, frasi brevi e gentili.\n"
+        "Per ogni richiesta scegli UNA azione: lo strumento giusto qui sotto, oppure \"rispondi\" per parlare.\n"
+        "Se l'utente chiede di fare qualcosa sul PC usa uno strumento; non dire di averlo fatto senza usarlo.\n"
+        "Se non sai una cosa o non puoi farla, dillo in breve. Non inventare.\n\n"
+        f"Strumenti:\n{lines}\n\nEsempi:\n{examples}"
     )
 
 
-def answer_schema(names: list[str]) -> dict[str, Any]:
-    return {
+def answer_schema(names: list[str], tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    params = {(t.get("function") or {}).get("name"): (t.get("function") or {}).get("parameters") for t in tools or []}
+    branches: list[dict[str, Any]] = [{
         "type": "object",
-        "properties": {
-            "azione": {"type": "string", "enum": [*names, "rispondi"]},
-            "argomenti": {"type": "object"},
-            "risposta": {"type": "string"},
-        },
+        "properties": {"azione": {"const": "rispondi"}, "argomenti": {"type": "object", "maxProperties": 0},
+                       "risposta": {"type": "string", "minLength": 1, "maxLength": 400}},
         "required": ["azione", "argomenti", "risposta"],
-    }
+    }]
+    for name in names:
+        schema = params.get(name) or {"type": "object", "properties": {}}
+        arguments = {"type": "object", "properties": schema.get("properties") or {},
+                     "required": schema.get("required") or [], "additionalProperties": False}
+        branches.append({
+            "type": "object",
+            "properties": {"azione": {"const": name}, "argomenti": arguments, "risposta": {"type": "string",
+                                                                                           "maxLength": 200}},
+            "required": ["azione", "argomenti", "risposta"],
+        })
+    return {"anyOf": branches}
 
 
 def to_local_messages(messages: list[dict[str, Any]], system: str) -> list[dict[str, str]]:
@@ -214,6 +236,11 @@ def to_local_messages(messages: list[dict[str, Any]], system: str) -> list[dict[
     return [{"role": "system", "content": system}, *out[start:]]
 
 
+_CLAIMS_DONE = re.compile(r"^\s*(fatto|ho (?:aperto|avviato|scritto|mandato|inviato|messo|chiuso|cercato|impostato))\b",
+                          re.I)
+_CANT_DO = "Questo con l'AI sul PC non riesco a farlo. Con una chiave online (Groq o Gemini, gratis) sì."
+
+
 def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
     try:
         data = json.loads(raw)
@@ -225,6 +252,8 @@ def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
     args = data.get("argomenti") if isinstance(data.get("argomenti"), dict) else {}
     reply = str(data.get("risposta") or "").strip()
     if action == "rispondi" or action not in allowed:
+        if allowed and _CLAIMS_DONE.match(reply):
+            reply = _CANT_DO
         return {"role": "assistant", "content": reply}
     return {
         "role": "assistant",
@@ -234,6 +263,23 @@ def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
             "function": {"name": action, "arguments": json.dumps(args, ensure_ascii=False)},
         }],
     }
+
+
+def result_reply(messages: list[dict[str, Any]]) -> str | None:
+    if not messages or messages[-1].get("role") != "tool":
+        return None
+    parts = []
+    for message in reversed(messages):
+        if message.get("role") != "tool":
+            break
+        try:
+            result = json.loads(message.get("content") or "{}")
+        except ValueError:
+            result = {}
+        text = str(result.get("esito") or "") if result.get("ok") else \
+            "Non ci sono riuscita: " + str(result.get("errore") or "errore sconosciuto")
+        parts.append(text.strip())
+    return " ".join(reversed([p for p in parts if p])) or "Fatto."
 
 
 def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -415,6 +461,9 @@ class LocalLLMClient:
     def _complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
                   tool_choice: str | None, max_tokens: int) -> ChatResult:
         name = self._model_name()
+        spoken = result_reply(messages)
+        if spoken is not None:
+            return ChatResult(message={"role": "assistant", "content": spoken}, model=name, finish_reason="stop")
         usable = [t for t in (tools or []) if (t.get("function") or {}).get("name") in LOCAL_TOOLS]
         names = [] if tool_choice == "none" else [t["function"]["name"] for t in usable]
         chat = to_local_messages(messages, build_prompt(usable, self._user_name()))
@@ -429,8 +478,9 @@ class LocalLLMClient:
                     "temperature": 0.2,
                     "max_tokens": min(max_tokens, 300),
                     "response_format": {"type": "json_schema",
-                                        "json_schema": {"name": "azione", "schema": answer_schema(names)}},
+                                        "json_schema": {"name": "azione", "schema": answer_schema(names, usable)}},
                     "cache_prompt": True,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
                 timeout=httpx.Timeout(120.0, connect=5.0),
             )

@@ -79,6 +79,7 @@ class Brain:
                             "name": (call.get("function") or {}).get("name", ""),
                             "arguments": (call.get("function") or {}).get("arguments") or "{}",
                         },
+                        **({"extra_content": call["extra_content"]} if call.get("extra_content") else {}),
                     }
                     for index, call in enumerate(calls)
                 ],

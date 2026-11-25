@@ -40,7 +40,7 @@ CLAUDE_MODELS = {
     "claude-haiku-5-5": "Claude Haiku 5.5 (il più veloce ed economico)",
 }
 DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 
 STT_ENGINES = ("local", "groq", "gemini")
 LOCAL_STT_MODELS = {
@@ -51,9 +51,9 @@ LOCAL_STT_MODELS = {
 DEFAULT_LOCAL_STT_MODEL = "base-q5_1"
 
 LOCAL_LLM_MODELS = {
-    "qwen2.5-0.5b": ("Leggero", 491, "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "qwen2.5-0.5b": ("Leggera", 491, "qwen2.5-0.5b-instruct-q4_k_m.gguf",
                      "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"),
-    "qwen2.5-1.5b": ("Bilanciato", 1117, "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "qwen2.5-1.5b": ("Consigliata", 1117, "qwen2.5-1.5b-instruct-q4_k_m.gguf",
                      "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"),
 }
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5-1.5b"
@@ -200,6 +200,9 @@ class Settings:
         if self.claude_model not in CLAUDE_MODELS:
             self.claude_model = DEFAULT_CLAUDE_MODEL
         self.gemini_model = (self.gemini_model or DEFAULT_GEMINI_MODEL).strip()
+        if self.gemini_model.startswith("gemini-2."):
+            self.gemini_model = {"gemini-2.5-flash-lite": "gemini-flash-lite-latest",
+                                 "gemini-2.5-pro": "gemini-pro-latest"}.get(self.gemini_model, DEFAULT_GEMINI_MODEL)
         self.openrouter_api_key = (self.openrouter_api_key or "").strip()
         self.openrouter_model = (self.openrouter_model or "").strip()
         if self.local_llm_model not in LOCAL_LLM_MODELS:

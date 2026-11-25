@@ -173,6 +173,12 @@ class GroqClient:
         except Exception:
             log.debug("usage bookkeeping failed", exc_info=True)
 
+    def _outgoing(self, message: dict[str, Any]) -> dict[str, Any]:
+        out = {k: v for k, v in message.items() if not k.startswith("_")}
+        if out.get("tool_calls") and self.PROVIDER != "gemini":
+            out["tool_calls"] = [{k: v for k, v in c.items() if k != "extra_content"} for c in out["tool_calls"]]
+        return out
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -191,7 +197,7 @@ class GroqClient:
             for attempt in range(2):
                 payload: dict[str, Any] = {
                     "model": model,
-                    "messages": [{k: v for k, v in m.items() if not k.startswith("_")} for m in messages],
+                    "messages": [self._outgoing(m) for m in messages],
                     "max_completion_tokens": max_tokens,
                     "temperature": temperature,
                     **self.params_for(model),

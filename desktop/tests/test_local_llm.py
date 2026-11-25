@@ -94,15 +94,31 @@ def test_client_asks_llama_server_with_a_json_schema(monkeypatch):
     assert server.started == ["qwen2.5-0.5b"]
     url, headers, body = sent[0]
     assert url == "http://127.0.0.1:1/v1/chat/completions" and headers["Authorization"] == "Bearer k"
-    enum = body["response_format"]["json_schema"]["schema"]["properties"]["azione"]["enum"]
-    assert enum == ["open_app", "rispondi"]
+    branches = body["response_format"]["json_schema"]["schema"]["anyOf"]
+    actions = sorted(b["properties"]["azione"]["const"] for b in branches)
+    assert actions == ["open_app", "rispondi"]
+    app = next(b for b in branches if b["properties"]["azione"]["const"] == "open_app")
+    assert app["properties"]["argomenti"]["additionalProperties"] is False
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert result.message["tool_calls"][0]["function"]["name"] == "open_app"
 
 
 def test_no_tools_when_only_an_answer_is_wanted(monkeypatch):
     client, _, sent = _client(monkeypatch, {"azione": "rispondi", "argomenti": {}, "risposta": "Fatto."})
     asyncio.run(client.chat([{"role": "user", "content": "ok"}], tools=[OPEN_APP], tool_choice="none"))
-    assert sent[0][2]["response_format"]["json_schema"]["schema"]["properties"]["azione"]["enum"] == ["rispondi"]
+    branches = sent[0][2]["response_format"]["json_schema"]["schema"]["anyOf"]
+    assert [b["properties"]["azione"]["const"] for b in branches] == ["rispondi"]
+
+
+def test_a_tool_result_is_said_without_asking_the_model(monkeypatch):
+    client, _, sent = _client(monkeypatch, {"azione": "rispondi", "argomenti": {}, "risposta": "x"})
+    history = [
+        {"role": "user", "content": "apri brave"},
+        {"role": "assistant", "tool_calls": [{"id": "a", "function": {"name": "open_app", "arguments": "{}"}}]},
+        {"role": "tool", "name": "open_app", "content": '{"ok": true, "esito": "Ho avviato Brave."}'},
+    ]
+    result = asyncio.run(client.chat(history, tools=[OPEN_APP]))
+    assert result.message["content"] == "Ho avviato Brave." and sent == []
 
 
 def test_a_repeated_action_turns_into_its_result(monkeypatch):
