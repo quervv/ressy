@@ -17,8 +17,25 @@ INCLUDE = [
     "desktop/requirements.txt", "desktop/requirements-dev.txt",
     "server/ressy_server", "server/tests", "server/Dockerfile", "server/.dockerignore", "server/.env.example",
     "server/pyproject.toml", "server/requirements.txt", "server/requirements-dev.txt",
-    "deploy", "web",
+    "deploy",
 ]
+SITE = ["web"]
+SITE_EXTRA = {
+    "README.md": (
+        "# ressy-web\n\n"
+        "Il sito di [Ressy](https://github.com/quervv/ressy), l'assistente vocale per Windows: https://ressy.top\n\n"
+        "Pagine statiche più tre Vercel Functions in `api/admin/` per la pagina `/admin` (metriche del sito).\n\n"
+        "## Variabili d'ambiente (Vercel)\n\n"
+        "| Nome | Serve per |\n|---|---|\n"
+        "| `ADMIN_PASSWORD` | password di `/admin`, almeno 12 caratteri. Cambiarla chiude tutte le sessioni. |\n"
+        "| `VERCEL_TOKEN` | token Vercel per leggere Web Analytics (attivalo in Analytics). |\n"
+        "| `VERCEL_TEAM_ID` | ID del team, se il progetto sta in un team. |\n"
+        "| `ANALYTICS_PROJECT_ID` | facoltativa: di default si usa il progetto stesso. |\n"
+        "| `GITHUB_REPO` / `GITHUB_TOKEN` | facoltative: repo delle release (`quervv/ressy`) e token per più richieste. |\n\n"
+        "Licenza MIT. Il font Archivo è sotto SIL Open Font License (`fonts/OFL.txt`).\n"
+    ),
+    ".gitignore": "download/\nnode_modules/\n.vercel/\n.env*\n",
+}
 SKIP_DIRS = {"__pycache__", ".pytest_cache", ".venv", "build", "dist", "download", "node_modules"}
 SKIP_FILES = {".env", "build_release.log"}
 SKIP_SUFFIXES = {".pyc", ".log", ".db", ".sqlite3", ".spec", ".part"}
@@ -84,15 +101,15 @@ def strip_with_esbuild(paths: list[Path]) -> None:
         path.write_bytes(text.encode("utf-8"))
 
 
-def copy_tree(dest: Path) -> list[Path]:
+def copy_tree(dest: Path, include: list[str], base: Path) -> list[Path]:
     copied: list[Path] = []
-    for item in INCLUDE:
+    for item in include:
         src = ROOT / item
         if not src.exists():
             continue
         files = [src] if src.is_file() else [p for p in src.rglob("*") if p.is_file()]
         for file in files:
-            rel = file.relative_to(ROOT)
+            rel = file.relative_to(base)
             if any(part in SKIP_DIRS for part in rel.parts) or file.name in SKIP_FILES \
                     or file.suffix in SKIP_SUFFIXES:
                 continue
@@ -104,9 +121,12 @@ def copy_tree(dest: Path) -> list[Path]:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    site = "--site" in args
+    args = [a for a in args if a != "--site"]
+    if len(args) != 1:
         raise SystemExit(__doc__)
-    dest = Path(sys.argv[1]).resolve()
+    dest = Path(args[0]).resolve()
     if ROOT in dest.parents or dest == ROOT:
         raise SystemExit("la destinazione deve stare fuori dal progetto")
     if dest.exists():
@@ -116,7 +136,14 @@ def main() -> None:
                 continue
             shutil.rmtree(child) if child.is_dir() else child.unlink()
     dest.mkdir(parents=True, exist_ok=True)
-    files = copy_tree(dest)
+    if site:
+        files = copy_tree(dest, SITE, ROOT / "web")
+        for name, text in SITE_EXTRA.items():
+            (dest / name).write_text(text, encoding="utf-8", newline="\n")
+        license_file = dest / "LICENSE"
+        shutil.copy2(ROOT / "LICENSE", license_file)
+    else:
+        files = copy_tree(dest, INCLUDE, ROOT)
     web_assets = []
     for file in files:
         if file.suffix == ".py":

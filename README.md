@@ -15,9 +15,10 @@ ressy/
 ├── desktop/            l'app Windows (PySide6): tasto, microfono, HUD, strumenti, il tuo bot
 │   └── installer/      Ressy-Setup.exe (installazione per l'utente, senza amministratore)
 ├── server/             il server del bot (aiohttp + Telegram + Discord): dentro l'app o self-host
-├── deploy/             Docker Compose + Caddy per un server su VPS (e il sito)
-└── web/                la landing page statica di ressy.top
+└── deploy/             Docker Compose + Caddy per un server su VPS
 ```
+
+Il sito [ressy.top](https://ressy.top) ha un suo repository: [quervv/ressy-web](https://github.com/quervv/ressy-web).
 
 ## Come funziona
 
@@ -126,7 +127,7 @@ cd deploy
 docker compose up -d --build
 ```
 
-Caddy inoltra `/ws/agent` (la connessione delle app) e `/health` al server, e serve anche il sito da `web/`. Il database SQLite vive nel volume `ressy-data`. Il file `server/.env.example` spiega ogni variabile: tolleranza offline, timeout dei comandi, limite di comandi al minuto. Nelle app scrivi `wss://tuodominio/ws/agent`.
+Caddy inoltra `/ws/agent` (la connessione delle app) e `/health` al server, e, se cloni [ressy-web](https://github.com/quervv/ressy-web) nella cartella `web/`, serve anche il sito. Il database SQLite vive nel volume `ressy-data`. Il file `server/.env.example` spiega ogni variabile: tolleranza offline, timeout dei comandi, limite di comandi al minuto. Nelle app scrivi `wss://tuodominio/ws/agent`.
 
 ### Senza Docker
 
