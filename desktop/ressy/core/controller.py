@@ -169,6 +169,8 @@ class Controller:
         self.runner = runner or AsyncRunner()
 
         self.mic = Microphone(lambda: self.settings.mic_device)
+        self.mic.on_switch = lambda name: self.ui.toast(
+            "Microfono", f"Il microfono predefinito di Windows non manda suono: uso «{name}».")
         self.player = AudioPlayer(lambda: self.settings.output_device)
         self.cue_player = AudioPlayer(lambda: self.settings.output_device)
         self.llm = LLMRouter(settings)

@@ -293,3 +293,13 @@ def test_shortcuts_on_desktop_and_taskbar_are_found(tmp_path):
     (tmp_path / "notes.txt").write_text("x")
     names = {e.name for e in scan_shortcuts([tmp_path])}
     assert names == {"Rocket League", "OBS Studio"}
+
+
+def test_a_silent_default_microphone_is_replaced(monkeypatch):
+    from ressy.audio import devices
+
+    monkeypatch.setattr(devices, "probe_inputs", lambda seconds=0.5, skip="": [
+        ("Cuffia wireless", -97.0), ("Microphone (USB MIC PRO)", -59.0), ("Webcam", -70.0)])
+    assert devices.live_input() == "Microphone (USB MIC PRO)"
+    monkeypatch.setattr(devices, "probe_inputs", lambda seconds=0.5, skip="": [("Cuffia wireless", -97.0)])
+    assert devices.live_input() == ""

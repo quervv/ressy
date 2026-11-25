@@ -708,7 +708,7 @@ class Setup(Backdrop):
         }
         if app:
             plan["brain"] = self.brain.values()
-            plan["speech"] = self.speech.values()
+            plan["speech"] = {**self.speech.values(), "mic_device": self.trial.mic_device}
             if self.speech.needs_download():
                 plan["download"] = plan["speech"]["local_stt_model"]
         if server:

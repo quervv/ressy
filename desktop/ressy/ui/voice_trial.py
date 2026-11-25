@@ -9,7 +9,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
 
@@ -36,6 +36,7 @@ class _Relay(QObject):
     level = Signal(float)
     result = Signal(str, bool, str, str)
     ready = Signal(str)
+    switched = Signal(str)
 
 
 class _Check(QWidget):
@@ -126,6 +127,7 @@ class VoiceTrial(QWidget):
         self.relay.level.connect(self._on_level)
         self.relay.result.connect(self._on_result)
         self.relay.ready.connect(self._on_ready)
+        self.relay.switched.connect(self._on_switched)
 
         self.rows: dict[str, tuple[_Check, QLabel, QLabel]] = {}
         layout = QVBoxLayout(self)
@@ -167,6 +169,16 @@ class VoiceTrial(QWidget):
         self.talk.setEnabled(False)
         right = QVBoxLayout()
         right.setSpacing(8)
+        mic_row = QHBoxLayout()
+        mic_row.setSpacing(10)
+        mic_label = QLabel("Microfono")
+        mic_label.setObjectName("hint")
+        self.mic_choice = QComboBox()
+        self.mic_choice.setMinimumWidth(260)
+        self.mic_choice.currentIndexChanged.connect(self._on_mic_chosen)
+        mic_row.addWidget(mic_label)
+        mic_row.addWidget(self.mic_choice, 1)
+        right.addLayout(mic_row)
         self.status = QLabel("Preparo il microfono e il modello…")
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
@@ -192,7 +204,68 @@ class VoiceTrial(QWidget):
         self._mark_current()
         self.talk.setEnabled(False)
         self.status.setText("Preparo il microfono e il modello…")
+        self._fill_mics(getattr(settings, "mic_device", ""))
         threading.Thread(target=self._prepare, name="ressy-trial-prepare", daemon=True).start()
+
+    @property
+    def mic_device(self) -> str:
+        return str(self.mic_choice.currentData() or "")
+
+    def _fill_mics(self, selected: str) -> None:
+        from ..audio import devices
+
+        self.mic_choice.blockSignals(True)
+        self.mic_choice.clear()
+        self.mic_choice.addItem("Predefinito di Windows", "")
+        for name in devices.input_devices():
+            if "mapper" not in name.lower():
+                self.mic_choice.addItem(name, name)
+        index = self.mic_choice.findData(selected)
+        self.mic_choice.setCurrentIndex(max(0, index))
+        self.mic_choice.blockSignals(False)
+
+    def _on_mic_chosen(self, _index: int) -> None:
+        if self.settings is None:
+            return
+        self.settings.mic_device = self.mic_device
+        if self._mic is None:
+            return
+        self.stop()
+        self.status.setText("Cambio microfono…")
+        threading.Thread(target=self._reopen_mic, name="ressy-trial-mic", daemon=True).start()
+
+    def _reopen_mic(self) -> None:
+        from ..audio.mic import MicError
+
+        try:
+            self._open_mic()
+        except MicError as exc:
+            self.relay.ready.emit(f"mic:{exc}")
+            return
+        self.relay.ready.emit("")
+
+    def _open_mic(self) -> None:
+        from ..audio.mic import Microphone
+
+        mic = Microphone(lambda: getattr(self.settings, "mic_device", ""))
+        mic.on_switch = self.relay.switched.emit
+        mic.start(self._on_frame)
+        self._mic = mic
+
+    def _on_switched(self, name: str) -> None:
+        self.mic_choice.blockSignals(True)
+        index = self.mic_choice.findData(name)
+        if index < 0:
+            self.mic_choice.addItem(name, name)
+            index = self.mic_choice.count() - 1
+        self.mic_choice.setCurrentIndex(index)
+        self.mic_choice.blockSignals(False)
+        if self.settings is not None:
+            self.settings.mic_device = name
+        self.status.setText(
+            f"Il microfono predefinito di Windows non manda suono: uso «{name}». "
+            "Puoi sceglierne un altro qui sopra."
+        )
 
     def stop(self) -> None:
         mic, self._mic = self._mic, None
@@ -204,18 +277,16 @@ class VoiceTrial(QWidget):
 
     def _prepare(self) -> None:
         try:
-            from ..audio.mic import MicError, Microphone
+            from ..audio.mic import MicError
             from ..speech.stt import SpeechToText
 
             self._stt = SpeechToText(self.settings, None, vocabulary=lambda: ["Ressy", "time.is"])
             self._stt.preload()
-            mic = Microphone(lambda: getattr(self.settings, "mic_device", ""))
             try:
-                mic.start(self._on_frame)
+                self._open_mic()
             except MicError as exc:
                 self.relay.ready.emit(f"mic:{exc}")
                 return
-            self._mic = mic
             self.relay.ready.emit("")
         except Exception as exc:
             log.warning("trial setup failed", exc_info=True)
@@ -241,7 +312,7 @@ class VoiceTrial(QWidget):
         if self._recording:
             with self._lock:
                 self._frames.append(frame.copy())
-            self.relay.level.emit(max(0.0, min(1.0, (db + 60) / 50)))
+        self.relay.level.emit(max(0.0, min(1.0, (db + 60) / 50)))
 
     def _on_level(self, value: float) -> None:
         self.meter.setValue(int(value * 1000))
@@ -259,9 +330,10 @@ class VoiceTrial(QWidget):
         if not self._recording:
             return
         self._recording = False
-        self.meter.setValue(0)
         with self._lock:
             frames, self._frames = self._frames, []
+        if self._mic is None:
+            return
         if time.monotonic() - self._started < 0.4 or not frames:
             self.status.setText("Tieni premuto mentre parli, poi lascia.")
             return

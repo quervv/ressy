@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from typing import Callable
 
 import numpy as np
@@ -26,6 +27,8 @@ class MicError(RuntimeError):
 class _Session:
 
     def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.loudest = -120.0
         self.frames: queue.Queue[np.ndarray] = queue.Queue(maxsize=600)
         self.stop = threading.Event()
         self.resampler: StreamResampler | None = None
@@ -40,6 +43,9 @@ class Microphone:
         self._session: _Session | None = None
         self._lock = threading.Lock()
         self._on_frame: FrameCallback | None = None
+        self.fallback = ""
+        self._fallback_checked = False
+        self.on_switch: Callable[[str], None] | None = None
         self.level = 0.0
         self.meter = Meter()
 
@@ -59,7 +65,8 @@ class Microphone:
             import sounddevice as sd
 
             session = _Session()
-            device = devices.resolve(self._device_name(), "input")
+            chosen = self._device_name()
+            device = devices.resolve(chosen or self.fallback, "input")
             callback = self._make_callback(session)
             try:
                 stream = sd.InputStream(
@@ -110,6 +117,26 @@ class Microphone:
         self.meter.clear()
         log.debug("microphone stopped")
 
+    def _find_live_input(self) -> None:
+        log.warning("the default microphone sends only silence: looking for one that works")
+        was_running = self.running
+        self.stop()
+        name = devices.live_input()
+        if name:
+            self.fallback = name
+            log.info("using the microphone %r instead of the silent default", name)
+        if was_running:
+            try:
+                self.start()
+            except MicError:
+                log.exception("cannot restart the microphone")
+                return
+        if name and self.on_switch is not None:
+            try:
+                self.on_switch(name)
+            except Exception:
+                log.exception("on_switch failed")
+
     @staticmethod
     def _make_callback(session: _Session):
         def callback(indata, frames, time_info, status) -> None:
@@ -137,6 +164,12 @@ class Microphone:
             if session.stop.is_set():
                 break
             db = rms_dbfs(frame)
+            if db > session.loudest:
+                session.loudest = db
+            if not self._fallback_checked and time.monotonic() - session.started > 2.5:
+                self._fallback_checked = True
+                if session.loudest <= devices.SILENT_DB and not self._device_name() and not self.fallback:
+                    threading.Thread(target=self._find_live_input, name="mic-fallback", daemon=True).start()
             target = level_from_dbfs(db)
             self.level = target if target > self.level else self.level * 0.82 + target * 0.18
             self.meter.push(frame, RATE)
