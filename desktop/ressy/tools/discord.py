@@ -4,7 +4,10 @@ import json
 import logging
 import time
 
+import re
+
 from ..speech.textnorm import normalize, similarity
+from ..speech.wake import phonetic
 from . import screen, winapi
 from .apps import launch
 from ..paths import app_dir
@@ -31,6 +34,36 @@ def remember_contact(name: str) -> None:
         _contacts_path().write_text(json.dumps([name, *names][:MAX_CONTACTS], ensure_ascii=False), encoding="utf-8")
     except OSError:
         log.debug("could not save the contact list", exc_info=True)
+
+def sounds_like(a: str, b: str) -> float:
+    na, nb = normalize(a).replace(" ", ""), normalize(b).replace(" ", "")
+    if not na or not nb:
+        return 0.0
+    pa, pb = phonetic(na), phonetic(nb)
+    return max(similarity(na, nb), similarity(pa, pb))
+
+
+def known_name(recipient: str, contacts: list[str] | None = None) -> str:
+    contacts = known_contacts() if contacts is None else contacts
+    best, score = recipient, 0.0
+    for name in contacts:
+        value = sounds_like(recipient, name)
+        if value > score:
+            best, score = name, value
+    return best if score >= 0.72 else recipient
+
+
+_HERE = re.compile(
+    r"^(?:qui|qua|questa chat|la chat (?:aperta|attuale|corrente)|chat (?:aperta|attuale|corrente)|"
+    r"(?:il |la |questo |questa )?(?:gruppo|canale|server|chat)(?: (?:in cui|dove|che) (?:sono|sto|ho aperto|e aperto|è aperto)"
+    r"(?: adesso| ora)?| attuale| aperto| aperta| corrente| di adesso)?|dove sono(?: adesso| ora)?|"
+    r"(?:il )?(?:gruppo|canale) (?:dove|in cui) (?:sono|sto)(?: adesso| ora)?)$"
+)
+
+
+def means_current_chat(recipient: str) -> bool:
+    return bool(_HERE.match(normalize(recipient)))
+
 
 log = logging.getLogger("ressy.discord")
 
@@ -132,7 +165,7 @@ def _clean_name(text: str) -> str:
     return text.strip().lstrip("@#").strip()
 
 
-def pick_result(lines: list[screen.Line], recipient: str, query_text: str) -> tuple[float, tuple[int, int], str] | None:
+def _result_rows(lines: list[screen.Line], query_text: str) -> list[screen.Line] | None:
     search_y = None
     for line in lines:
         if screen.find_text([line], query_text, threshold=0.85) is not None:
@@ -140,19 +173,39 @@ def pick_result(lines: list[screen.Line], recipient: str, query_text: str) -> tu
             break
     if search_y is None:
         return None
-    candidates = [line for line in lines if line.box[1] > search_y + 4]
-    found = screen.find_text(candidates, recipient, threshold=0.72)
-    if found is None:
+    rows = [line for line in lines if line.box[1] > search_y + 4 and len(_clean_name(line.text)) >= 2]
+    return rows[:8]
+
+
+def pick_result(lines: list[screen.Line], recipient: str, query_text: str) -> tuple[float, tuple[int, int], str] | None:
+    rows = _result_rows(lines, query_text)
+    if not rows:
         return None
-    score, line, point = found
-    return score, point, line.text
+    found = screen.find_text(rows, recipient, threshold=0.72)
+    if found is not None:
+        score, line, point = found
+        return score, point, line.text
+    names = [row for row in rows if _looks_like_a_name(row.text)]
+    if len(names) == 1:
+        row = names[0]
+        head = _clean_name(row.text).split("  ")[0]
+        if sounds_like(head.split()[0] if head.split() else head, recipient) >= 0.55 \
+                or sounds_like(head, recipient) >= 0.55:
+            x0, y0, x1, y1 = row.box
+            return 0.55, ((x0 + x1) // 2, (y0 + y1) // 2), row.text
+    return None
 
 
-def visible_names(lines: list[screen.Line], query_text: str, limit: int = 6) -> list[str]:
+def _looks_like_a_name(text: str) -> bool:
+    t = _clean_name(text)
+    return 2 <= len(t) <= 60 and not t.lower().startswith(("cerca", "search", "suggerimento", "protip", "consiglio"))
+
+
+def visible_names(lines: list[screen.Line], query_text: str, limit: int = 5) -> list[str]:
     out: list[str] = []
-    for line in lines:
+    for line in _result_rows(lines, query_text) or []:
         text = _clean_name(line.text)
-        if len(text) < 2 or normalize(text) == normalize(query_text):
+        if not _looks_like_a_name(text) or normalize(text) == normalize(query_text):
             continue
         if text not in out:
             out.append(text)
@@ -188,6 +241,28 @@ class _Stuck(ToolError):
     pass
 
 
+def _wait_confirmed(hwnd: int, title_before: str, recipient: str, kind: str, use_ocr: bool, row: str,
+                    timeout: float = 3.5) -> str:
+    names = [recipient]
+    clicked = _clean_name(row).split("  ")[0].strip()
+    if clicked and normalize(clicked) != normalize(recipient):
+        names.append(clicked)
+    deadline = time.monotonic() + timeout
+    checked_header = False
+    while True:
+        time.sleep(0.4)
+        title_after = winapi.window_title(hwnd)
+        if any(chat_confirmed(title_before, title_after, name, kind) for name in names):
+            return "title"
+        if use_ocr and (time.monotonic() > deadline - 1.5 or not checked_header):
+            header = _read(_header_region(hwnd))
+            checked_header = True
+            if any(header_confirms(header, name) for name in names):
+                return "header"
+        if time.monotonic() > deadline:
+            return ""
+
+
 def _open_chat(window: winapi.Window, recipient: str, kind: str) -> str:
     hwnd = window.hwnd
     use_ocr = screen.ocr_available()
@@ -216,17 +291,15 @@ def _open_chat(window: winapi.Window, recipient: str, kind: str) -> str:
             winapi.click(x, y)
         else:
             winapi.tap(winapi.VK["enter"])
-        time.sleep(1.3)
-
-        title_after = winapi.window_title(hwnd)
-        if chat_confirmed(title_before, title_after, recipient, kind):
-            return "title"
-        if use_ocr and header_confirms(_read(_header_region(hwnd)), recipient):
-            return "header"
+        confirmed = _wait_confirmed(hwnd, title_before, recipient, kind, use_ocr, row if use_ocr else "")
+        if confirmed:
+            return confirmed
         log.info("discord: chat opened but not confirmed")
         winapi.tap(winapi.VK["esc"])
         time.sleep(0.3)
-    hint = f" Su Discord vedo: {', '.join(offered)}." if offered else ""
+    hint = (f" Nella ricerca di Discord ci sono: {', '.join(offered)}. Chiedi all'utente se intendeva uno di "
+            "questi e, se sì, riprova con quel nome esatto.") if offered else \
+        " Chiedi all'utente di ripetere o scrivere il nome come appare su Discord."
     raise _Stuck(
         f"Non ho trovato la chat con '{recipient}' su Discord (o non sono riuscita a verificarla): "
         f"il messaggio NON è stato inviato.{hint}"
@@ -234,11 +307,15 @@ def _open_chat(window: winapi.Window, recipient: str, kind: str) -> str:
 
 
 def send_discord_message(ctx: ToolContext, args: dict) -> str:
-    recipient = _clean_name(args["recipient"])
+    recipient = _clean_name(args.get("recipient") or "")
     message = args["message"].strip()
-    kind = "channel" if args.get("kind") == "channel" else "user"
-    if not recipient:
+    kind = args.get("kind") if args.get("kind") in ("user", "channel", "current") else "user"
+    if kind != "current" and (not recipient or means_current_chat(recipient)):
+        kind = "current" if recipient else kind
+    if kind != "current" and not recipient:
         raise ToolError("A chi devo scrivere?")
+    if kind == "user":
+        recipient = known_name(recipient)
     if not message:
         raise ToolError("Il messaggio è vuoto.")
     if len(message) > MAX_LENGTH:
@@ -260,7 +337,11 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
         raise ToolError("Non riesco a portare Discord in primo piano.")
     time.sleep(0.35)
 
-    _open_chat(window, recipient, kind)
+    if kind == "current":
+        winapi.tap(winapi.VK["esc"])
+        time.sleep(0.15)
+    else:
+        _open_chat(window, recipient, kind)
 
     if winapi.foreground_window() != window.hwnd:
         raise ToolError("Discord ha perso il focus: messaggio NON inviato.")
@@ -272,22 +353,27 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
     time.sleep(0.4)
     target = _chat_name(winapi.window_title(window.hwnd))
     if not target or target.lower() == "discord":
-        target = recipient
-    remember_contact(recipient)
+        target = recipient or "la chat aperta"
+    if kind == "user":
+        remember_contact(_clean_name(target.split(" | ")[0]) if target.startswith("@") else recipient)
     return f"Messaggio inviato su Discord a {target}."
 
 
 TOOLS = [
     Tool(
         "send_discord_message",
-        "Scrive e invia un messaggio su Discord (app desktop) a un utente o a un canale. Apre Discord se serve.",
+        "Invia un messaggio su Discord a un amico, a un canale o nella chat aperta (kind=current). "
+        "Apre Discord e trova la chat da solo: non chiamare open_app prima.",
         params(
             {
-                "recipient": {"type": "string", "description": "nome utente/amico (come appare su Discord), o nome del canale senza #"},
-                "message": {"type": "string", "description": "testo esatto da inviare"},
-                "kind": {"type": "string", "enum": ["user", "channel"], "description": "default user"},
+                "recipient": {"type": "string", "description": "nome dell'amico o del canale (senza @ o #) come lo ha "
+                                                              "detto l'utente; vuoto se kind=current"},
+                "message": {"type": "string", "description": "testo esatto da inviare, in prima persona come lo "
+                                                            "scriverebbe l'utente (es. «arrivo tra 10 minuti»)"},
+                "kind": {"type": "string", "enum": ["user", "channel", "current"],
+                         "description": "user = persona (default), channel = canale di un server, current = chat aperta"},
             },
-            ["recipient", "message"],
+            ["message"],
         ),
         send_discord_message,
         timeout=90,

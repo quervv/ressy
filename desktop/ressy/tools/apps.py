@@ -148,6 +148,78 @@ def _score(query: str, entry_norm: str) -> float:
     return score
 
 
+_GAME_URL = ("com.epicgames.launcher://", "steam://")
+_STEAM_TOOLS = ("steamworks", "redistributable", "proton", "steam linux runtime", "directx", "vcredist")
+
+
+def _epic_games() -> list[AppEntry]:
+    folder = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Epic/EpicGamesLauncher/Data/Manifests"
+    games: list[AppEntry] = []
+    for item in sorted(folder.glob("*.item")) if folder.is_dir() else []:
+        try:
+            data = json.loads(item.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        name, app = str(data.get("DisplayName") or "").strip(), str(data.get("AppName") or "").strip()
+        namespace, item_id = str(data.get("CatalogNamespace") or ""), str(data.get("CatalogItemId") or "")
+        if not name or not app or data.get("bIsIncompleteInstall"):
+            continue
+        if data.get("MainGameAppName") and data.get("MainGameAppName") != app:
+            continue
+        target = f"{namespace}%3A{item_id}%3A{app}" if namespace and item_id else app
+        games.append(AppEntry(name, f"com.epicgames.launcher://apps/{target}?action=launch&silent=true"))
+    return games
+
+
+def _steam_root() -> Path | None:
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            path = Path(winreg.QueryValueEx(key, "SteamPath")[0])
+            if path.is_dir():
+                return path
+    except OSError:
+        pass
+    default = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Steam"
+    return default if default.is_dir() else None
+
+
+def _steam_games() -> list[AppEntry]:
+    root = _steam_root()
+    if root is None:
+        return []
+    libraries = {root}
+    try:
+        vdf = (root / "steamapps" / "libraryfolders.vdf").read_text(encoding="utf-8", errors="replace")
+        libraries.update(Path(m.replace("\\\\", "\\")) for m in re.findall(r'"path"\s+"([^"]+)"', vdf))
+    except OSError:
+        pass
+    games: list[AppEntry] = []
+    for library in libraries:
+        for manifest in (library / "steamapps").glob("appmanifest_*.acf"):
+            try:
+                text = manifest.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            name = re.search(r'"name"\s+"([^"]+)"', text)
+            appid = re.search(r'"appid"\s+"(\d+)"', text)
+            if not name or not appid or any(t in name.group(1).lower() for t in _STEAM_TOOLS):
+                continue
+            games.append(AppEntry(name.group(1), f"steam://rungameid/{appid.group(1)}"))
+    return games
+
+
+def installed_games() -> list[AppEntry]:
+    games: list[AppEntry] = []
+    for source in (_epic_games, _steam_games):
+        try:
+            games += source()
+        except Exception:
+            log.debug("game scan failed (%s)", source.__name__, exc_info=True)
+    return games
+
+
 class AppIndex:
     def __init__(self, cache_path: Path) -> None:
         self.cache_path = cache_path
@@ -226,6 +298,8 @@ class AppIndex:
             if not apps:
                 apps = self._scan_start_menu()
             if apps:
+                known = {a.norm for a in apps}
+                apps += [g for g in installed_games() if g.norm not in known]
                 with self._lock:
                     self._apps = apps
                     self._loaded_at = time.time()
@@ -276,6 +350,9 @@ class AppIndex:
 
 def launch(entry: AppEntry) -> None:
     target = entry.app_id
+    if target.startswith(_GAME_URL):
+        os.startfile(target)
+        return
     if re.match(r"^[a-zA-Z]:\\", target) and Path(target).exists():
         os.startfile(target)
         return

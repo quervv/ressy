@@ -233,6 +233,19 @@ def test_gemini_thought_signature_goes_back_to_gemini_only():
     assert "extra_content" not in to_groq["tool_calls"][0] and "_claude" not in to_groq
 
 
+def test_a_call_from_another_brain_gets_gemini_placeholder_signature():
+    from ressy.brain.providers import GeminiClient
+
+    call = {"id": "c", "type": "function", "function": {"name": "open_app", "arguments": "{}"}}
+    message = {"role": "assistant", "tool_calls": [call]}
+    to_gemini = GeminiClient(lambda: "k")._outgoing(message)
+    to_groq = GroqClient(lambda: "k")._outgoing(message)
+    sig = to_gemini["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+    assert sig == "skip_thought_signature_validator"
+    assert "extra_content" not in to_groq["tool_calls"][0]
+    assert "extra_content" not in call
+
+
 def test_retired_gemini_models_are_migrated():
     from ressy.config import Settings
 

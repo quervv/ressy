@@ -74,6 +74,9 @@ def is_chat_model(model_id: str) -> bool:
     return not any(tag in lowered for tag in _NON_CHAT)
 
 
+_NO_SIGNATURE = "skip_thought_signature_validator"
+
+
 def _retry_after(response: httpx.Response) -> float | None:
     value = response.headers.get("retry-after")
     if not value:
@@ -177,6 +180,10 @@ class GroqClient:
         out = {k: v for k, v in message.items() if not k.startswith("_")}
         if out.get("tool_calls") and self.PROVIDER != "gemini":
             out["tool_calls"] = [{k: v for k, v in c.items() if k != "extra_content"} for c in out["tool_calls"]]
+        elif out.get("tool_calls"):
+            out["tool_calls"] = [c if c.get("extra_content") else
+                                 {**c, "extra_content": {"google": {"thought_signature": _NO_SIGNATURE}}}
+                                 for c in out["tool_calls"]]
         return out
 
     async def chat(

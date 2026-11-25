@@ -8,6 +8,9 @@ import subprocess
 import time
 
 from ..paths import pictures_dir
+from ..speech.textnorm import normalize, similarity
+from ..speech.wake import phonetic
+from .apps import launch
 from . import winapi
 from .registry import Attachment, Tool, ToolContext, ToolError, params
 
@@ -137,21 +140,94 @@ FOLDER_NAMES = {
 }
 
 
+_SKIP_DIRS = {"appdata", "node_modules", ".git", "__pycache__", ".venv", "venv", "$recycle.bin", ".cache"}
+
+
+def _folder_score(wanted: str, candidate: str) -> float:
+    a, b = normalize(wanted).replace(" ", ""), normalize(candidate).replace(" ", "")
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    score = max(similarity(a, b), similarity(phonetic(a), phonetic(b)))
+    if len(a) >= 4 and (b.startswith(a) or a in b):
+        score = max(score, 0.86)
+    return score
+
+
+def find_folder(wanted: str, roots: list[str] | None = None, max_depth: int = 3,
+                budget: float = 2.0) -> tuple[str | None, list[str]]:
+    if roots is None:
+        roots = [winapi.known_folder(k) for k in ("desktop", "documents", "downloads", "pictures", "music", "videos")]
+        roots.append(os.path.expanduser("~"))
+    deadline = time.monotonic() + budget
+    seen: set[str] = set()
+    queue = [(r, 0) for r in roots if r and os.path.isdir(r)]
+    best: tuple[float, int, str] | None = None
+    near: list[tuple[float, str]] = []
+    while queue and time.monotonic() < deadline:
+        folder, depth = queue.pop(0)
+        key = os.path.normcase(os.path.abspath(folder))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            low = entry.name.lower()
+            if low in _SKIP_DIRS or low.startswith("."):
+                continue
+            score = _folder_score(wanted, entry.name)
+            if score >= 0.8 and (best is None or (score, -depth) > (best[0], -best[1])):
+                best = (score, depth, entry.path)
+            elif score >= 0.7:
+                near.append((score, entry.name))
+            if depth + 1 < max_depth:
+                queue.append((entry.path, depth + 1))
+    if best is not None:
+        return best[2], []
+    near.sort(reverse=True)
+    return None, list(dict.fromkeys(name for _, name in near))[:4]
+
+
 def open_folder(ctx: ToolContext, args: dict) -> str:
-    name = args["name"].strip().lower()
+    raw_name = args["name"].strip().strip('"')
+    name = raw_name.lower()
     if name in ("screenshot ressy", "ressy", "screenshot"):
         folder = pictures_dir()
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(str(folder))
         return "Ho aperto la cartella degli screenshot di Ressy."
     key = FOLDER_NAMES.get(name)
-    if key is None:
-        raise ToolError("Posso aprire: Desktop, Documenti, Download, Immagini, Musica, Video, screenshot.")
-    path = winapi.known_folder(key)
-    if not path or not os.path.isdir(path):
-        raise ToolError("Non trovo quella cartella.")
-    os.startfile(path)
-    return f"Ho aperto la cartella {args['name']}."
+    if key is not None:
+        path = winapi.known_folder(key)
+        if not path or not os.path.isdir(path):
+            raise ToolError("Non trovo quella cartella.")
+        os.startfile(path)
+        return f"Ho aperto la cartella {raw_name}."
+    expanded = os.path.expandvars(os.path.expanduser(raw_name))
+    if os.path.isabs(expanded) and os.path.isdir(expanded):
+        os.startfile(expanded)
+        return f"Ho aperto la cartella {os.path.basename(expanded.rstrip(chr(92))) or expanded}."
+    path, near = find_folder(raw_name)
+    if path is not None:
+        os.startfile(path)
+        return f"Ho aperto la cartella {os.path.basename(path)} ({os.path.dirname(path)})."
+    apps = getattr(ctx.services, "apps", None)
+    if apps is not None:
+        entry, _ = apps.find(raw_name)
+        if entry is not None:
+            launch(entry)
+            return f"{raw_name} è un programma, non una cartella: l'ho aperto."
+    hint = f" Forse intendevi: {', '.join(near)}?" if near else ""
+    raise ToolError(f"Non trovo una cartella '{raw_name}' nel Desktop, Documenti, Download o nella cartella utente.{hint}")
 
 
 def _require_desktop() -> None:
@@ -226,7 +302,7 @@ TOOLS = [
     Tool("system_status", "Stato del PC: CPU, RAM, disco, batteria, da quanto è acceso.", params(), system_status),
     Tool(
         "open_folder",
-        "Apre una cartella: Desktop, Documenti, Download, Immagini, Musica, Video, screenshot.",
+        "Apre una cartella in Esplora file: Desktop, Documenti, Download… o una tua cartella per nome.",
         params({"name": {"type": "string"}}, ["name"]),
         open_folder,
     ),

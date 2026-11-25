@@ -46,8 +46,15 @@ def resolve_path(name: str, folder: str = "") -> Path:
     if key in FOLDERS:
         base = Path(winapi.known_folder(FOLDERS[key]) or _home() / "Desktop")
     elif folder.strip():
-        raw = Path(os.path.expandvars(os.path.expanduser(folder.strip().strip('"'))))
-        base = raw if raw.is_absolute() else Path(winapi.known_folder("desktop") or _home() / "Desktop") / raw
+        raw = Path(os.path.expandvars(os.path.expanduser(folder.strip().strip('"').replace("/", "\\"))))
+        if raw.is_absolute():
+            base = raw
+        else:
+            first = normalize(raw.parts[0]) if raw.parts else ""
+            if first in FOLDERS:
+                base = Path(winapi.known_folder(FOLDERS[first]) or _home() / raw.parts[0]).joinpath(*raw.parts[1:])
+            else:
+                base = Path(winapi.known_folder("desktop") or _home() / "Desktop") / raw
     else:
         base = Path(winapi.known_folder("desktop") or _home() / "Desktop")
     path = Path(name)

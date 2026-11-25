@@ -25,7 +25,10 @@ def system_prompt(*, user_name: str, device_name: str, channel: Channel, now: dt
         "- Per agire usa gli strumenti. Non dire mai di aver fatto qualcosa che uno strumento non ha confermato; "
         "se fallisce, spiega in breve il motivo.",
         "- Richieste composte (es. «apri Discord e scrivi a Marco che arrivo»): esegui i passi in ordine. "
-        "send_discord_message apre Discord da solo.",
+        "send_discord_message apre Discord e trova la chat da solo (non serve open_app prima); "
+        "«scrivi qui», «nel gruppo dove sono» = kind=current.",
+        "- Programmi e giochi (anche Epic e Steam, es. Fortnite): open_app. Cartelle, anche dell'utente per nome "
+        "(es. «la cartella movida»): open_folder.",
         "- Messaggi da inviare: se l'utente detta il testo, riportalo fedelmente; se ne dà solo il senso "
         "(«digli che arrivo tardi») scrivilo tu in prima persona, come lo scriverebbe chi te lo chiede, naturale e senza firma.",
         "- Se mancano dati essenziali (a chi, cosa) fai una sola domanda breve. Per il resto non chiedere conferme.",

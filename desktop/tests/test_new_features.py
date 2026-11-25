@@ -208,3 +208,76 @@ def test_failed_screen_tool_attaches_a_screenshot(monkeypatch):
     voice = ToolContext(channel=Channel("voice"), services=None)
     out = json.loads(asyncio.run(registry.invoke("clicca", "{}", voice)))
     assert "bloccata.png" in out["errore"] and voice.images == []
+
+
+def test_discord_single_result_that_sounds_like_the_name_is_taken():
+    lines = [_line("@trisercia", 100), _line("Trisser trisser_99", 160)]
+    score, (x, y), row = discord.pick_result(lines, "trisercia", "@trisercia")
+    assert y > 150 and row.startswith("Trisser")
+    lines = [_line("@marc", 100), _line("Marco", 160), _line("Marcella", 200)]
+    assert discord.pick_result(lines, "Mirko", "@marc") is None
+
+
+def test_discord_offers_only_switcher_rows_not_the_chat_behind():
+    lines = [_line("testo della chat di qualcuno", 40), _line("@job art", 100), _line("Jobart", 160)]
+    assert discord.visible_names(lines, "@job art") == ["Jobart"]
+
+
+@pytest.mark.parametrize("said, current", [
+    ("Il gruppo in cui sono adesso", True), ("qui", True), ("questo canale", True), ("la chat aperta", True),
+    ("dove sono adesso", True), ("Marco", False), ("generale", False),
+])
+def test_discord_current_chat_phrases(said, current):
+    assert discord.means_current_chat(said) is current
+
+
+def test_discord_misheard_name_snaps_to_a_known_contact():
+    contacts = ["Trisser", "Invading", "Birk"]
+    assert discord.known_name("trisercia", contacts) == "Trisser"
+    assert discord.known_name("Marco", contacts) == "Marco"
+
+
+def test_user_folders_are_found_by_name(tmp_path):
+    from ressy.tools.system import find_folder
+
+    (tmp_path / "progetti" / "sl bot").mkdir(parents=True)
+    (tmp_path / "Movida").mkdir()
+    (tmp_path / "node_modules" / "Trisser").mkdir(parents=True)
+    assert find_folder("S.L.Bot", roots=[str(tmp_path)])[0].endswith("sl bot")
+    assert find_folder("movida", roots=[str(tmp_path)])[0].endswith("Movida")
+    path, near = find_folder("Trisser", roots=[str(tmp_path)])
+    assert path is None
+
+
+def test_desktop_subfolder_is_not_doubled(monkeypatch, tmp_path):
+    from ressy.tools import more
+
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(more, "_home", lambda: tmp_path)
+    monkeypatch.setattr(more.winapi, "known_folder", lambda key: str(desktop) if key == "desktop" else None)
+    assert more.resolve_path("movida.txt", r"Desktop\movida") == desktop / "movida" / "movida.txt"
+    assert more.resolve_path("a.txt", "Desktop/movida") == desktop / "movida" / "a.txt"
+
+
+def test_epic_and_steam_games_are_listed(monkeypatch, tmp_path):
+    import json
+
+    from ressy.tools import apps
+
+    manifests = tmp_path / "Epic/EpicGamesLauncher/Data/Manifests"
+    manifests.mkdir(parents=True)
+    (manifests / "x.item").write_text(json.dumps({
+        "DisplayName": "Fortnite", "AppName": "Fortnite", "CatalogNamespace": "fn", "CatalogItemId": "abc"}))
+    steam = tmp_path / "Steam"
+    (steam / "steamapps").mkdir(parents=True)
+    (steam / "steamapps" / "appmanifest_322170.acf").write_text('"AppState"\n{\n\t"appid"\t\t"322170"\n\t"name"\t\t"Geometry Dash"\n}')
+    (steam / "steamapps" / "appmanifest_228980.acf").write_text(
+        '"AppState"\n{\n\t"appid"\t\t"228980"\n\t"name"\t\t"Steamworks Common Redistributables"\n}')
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setattr(apps, "_steam_root", lambda: steam)
+    games = {g.name: g.app_id for g in apps.installed_games()}
+    assert games == {
+        "Fortnite": "com.epicgames.launcher://apps/fn%3Aabc%3AFortnite?action=launch&silent=true",
+        "Geometry Dash": "steam://rungameid/322170",
+    }
