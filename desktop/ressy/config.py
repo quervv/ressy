@@ -78,6 +78,8 @@ class Settings:
     llm_fallback: bool = True
     local_llm_model: str = ""
     quick_commands: bool = True
+    auto_update: bool = True
+    last_version: str = ""
 
     stt_engine: str = ""
     stt_model: str = DEFAULT_STT_MODEL

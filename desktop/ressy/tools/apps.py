@@ -210,6 +210,48 @@ def _steam_games() -> list[AppEntry]:
     return games
 
 
+_NOT_APPS = ("uninstall", "disinstalla", "readme", "leggimi", "help", "guida", "manual", "license", "licenza",
+             "website", "sito web", "release notes", "changelog", "documentation", "documentazione")
+
+
+def _shortcut_roots() -> list[Path]:
+    env = os.environ.get
+    roots = [
+        Path(env("ProgramData", r"C:\ProgramData")) / "Microsoft/Windows/Start Menu/Programs",
+        Path(env("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path(env("APPDATA", "")) / "Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar",
+        Path(env("PUBLIC", r"C:\Users\Public")) / "Desktop",
+        Path(env("USERPROFILE", "")) / "Desktop",
+    ]
+    desktop = winapi.known_folder("desktop") if hasattr(winapi, "known_folder") else None
+    if desktop:
+        roots.append(Path(desktop))
+    out: list[Path] = []
+    for root in roots:
+        if str(root) not in {str(r) for r in out} and root.is_dir():
+            out.append(root)
+    return out
+
+
+def scan_shortcuts(roots: list[Path] | None = None, max_depth: int = 4) -> list[AppEntry]:
+    apps: list[AppEntry] = []
+    seen: set[str] = set()
+    for root in _shortcut_roots() if roots is None else roots:
+        base_depth = len(root.parts)
+        for dirpath, dirnames, filenames in os.walk(root):
+            if len(Path(dirpath).parts) - base_depth >= max_depth:
+                dirnames[:] = []
+            for filename in filenames:
+                stem, ext = os.path.splitext(filename)
+                if ext.lower() not in (".lnk", ".url") or any(w in stem.lower() for w in _NOT_APPS):
+                    continue
+                entry = AppEntry(stem.strip(), os.path.join(dirpath, filename))
+                if entry.norm and entry.norm not in seen:
+                    seen.add(entry.norm)
+                    apps.append(entry)
+    return apps
+
+
 def installed_games() -> list[AppEntry]:
     games: list[AppEntry] = []
     for source in (_epic_games, _steam_games):
@@ -297,9 +339,18 @@ class AppIndex:
                 apps = []
             if not apps:
                 apps = self._scan_start_menu()
+            known = {a.norm for a in apps}
+            for source in (installed_games, scan_shortcuts):
+                try:
+                    extra = source()
+                except Exception:
+                    log.debug("app source failed (%s)", source.__name__, exc_info=True)
+                    continue
+                for entry in extra:
+                    if entry.norm and entry.norm not in known:
+                        known.add(entry.norm)
+                        apps.append(entry)
             if apps:
-                known = {a.norm for a in apps}
-                apps += [g for g in installed_games() if g.norm not in known]
                 with self._lock:
                     self._apps = apps
                     self._loaded_at = time.time()
@@ -350,6 +401,9 @@ class AppIndex:
 
 def launch(entry: AppEntry) -> None:
     target = entry.app_id
+    if target.lower().endswith((".lnk", ".url", ".exe")) and os.path.isfile(target):
+        os.startfile(target)
+        return
     if target.startswith(_GAME_URL):
         os.startfile(target)
         return

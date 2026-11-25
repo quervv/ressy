@@ -42,9 +42,13 @@ from ressy.ui.brain_setup import BrainSetup, SpeechSetup
 from ressy.ui.voice_trial import VoiceTrial, settings_for_trial
 
 
+UPDATE = "--update" in sys.argv[1:]
+
+
 def payload_path() -> Path:
-    if len(sys.argv) > 1:
-        return Path(sys.argv[1])
+    files = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if files:
+        return Path(files[0])
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return base / "payload" / "Ressy-win64.zip"
 
@@ -124,6 +128,8 @@ class StepRail(QWidget):
 
 class Backdrop(QWidget):
 
+    divider = True
+
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(theme.PLATE))
@@ -132,9 +138,122 @@ class Backdrop(QWidget):
         glow.setColorAt(0.5, theme.color(theme.ACCENT, 0.05))
         glow.setColorAt(1, theme.color(theme.ACCENT, 0.0))
         p.fillRect(self.rect(), glow)
-        p.setPen(QPen(QColor(theme.PLATE_EDGE), 1))
-        p.drawLine(236, 96, 236, self.height() - 24)
+        if self.divider:
+            p.setPen(QPen(QColor(theme.PLATE_EDGE), 1))
+            p.drawLine(236, 96, 236, self.height() - 24)
         p.end()
+
+
+def copy_payload(folder: Path, progress) -> None:
+    if (folder / install.APP_EXE).exists():
+        shutil.rmtree(folder / "_internal", ignore_errors=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(payload_path()) as zf:
+        members = [m for m in zf.infolist() if not m.is_dir()]
+        for i, member in enumerate(members):
+            parts = Path(member.filename).parts
+            rel = Path(*parts[1:]) if parts and parts[0] == "Ressy" else Path(*parts)
+            target = (folder / rel).resolve()
+            if folder.resolve() not in target.parents:
+                raise RuntimeError(f"percorso non valido nel pacchetto: {member.filename}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1 << 20)
+            if i % 40 == 0:
+                progress(i / max(1, len(members)))
+
+
+class Updater(QObject):
+
+    step = Signal(str, int)
+    finished = Signal(str)
+
+    def __init__(self, folder: Path) -> None:
+        super().__init__()
+        self.folder = folder
+        self.server_was_running = False
+
+    def run(self) -> None:
+        try:
+            self._run()
+            self.finished.emit("")
+        except Exception as exc:
+            traceback.print_exc()
+            self.finished.emit(f"{type(exc).__name__}: {exc}")
+
+    def _run(self) -> None:
+        folder = self.folder
+        self.step.emit("Chiudo Ressy…", 5)
+        install.ask_app_to_quit()
+        self.server_was_running = install.stop_server()
+        if not install.wait_unlocked(folder, 20):
+            raise RuntimeError("Ressy.exe è ancora in uso: chiudi Ressy e riprova.")
+        self.step.emit("Copio i file…", 15)
+        copy_payload(folder, lambda pct: self.step.emit("Copio i file…", 15 + int(75 * pct)))
+        size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) // 1024
+        install.register_uninstall(folder, size)
+        self.step.emit("Fatto: riavvio Ressy…", 100)
+
+
+class UpdateWindow(Backdrop):
+
+    divider = False
+
+    def __init__(self, folder: Path) -> None:
+        super().__init__()
+        self.folder = folder
+        self.setWindowTitle("Aggiorno Ressy")
+        self.setWindowIcon(logo.app_icon())
+        self.setFixedSize(QSize(520, 230))
+        v = QVBoxLayout(self)
+        v.setContentsMargins(28, 24, 28, 24)
+        v.setSpacing(14)
+        head = QHBoxLayout()
+        head.setSpacing(12)
+        head.addWidget(Mark(40))
+        head.addWidget(title("Aggiorno Ressy"), 1)
+        version = QLabel(f"versione {__version__}")
+        version.setObjectName("hint")
+        head.addWidget(version, 0, Qt.AlignmentFlag.AlignBottom)
+        v.addLayout(head)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(10)
+        v.addWidget(self.bar)
+        self.status = QLabel("Un momento…")
+        self.status.setObjectName("hint")
+        self.status.setWordWrap(True)
+        v.addWidget(self.status)
+        v.addStretch(1)
+        self.close_button = QPushButton("Chiudi")
+        self.close_button.clicked.connect(QApplication.quit)
+        self.close_button.hide()
+        v.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignRight)
+
+        self.thread = QThread(self)
+        self.worker = Updater(folder)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.step.connect(lambda text, pct: (self.status.setText(text), self.bar.setValue(pct)))
+        self.worker.finished.connect(self._done)
+        self.worker.finished.connect(self.thread.quit)
+        self.thread.start()
+
+    def _done(self, error: str) -> None:
+        exe = self.folder / install.APP_EXE
+        if exe.exists():
+            flags = install.DETACHED_PROCESS
+            if self.worker.server_was_running:
+                subprocess.Popen([str(exe), "--server"], creationflags=flags, close_fds=True)
+            subprocess.Popen([str(exe), "--background"], creationflags=flags, close_fds=True)
+        if error:
+            self.status.setText(f"Aggiornamento non riuscito: {error}\nPuoi scaricare Ressy da ressy.top.")
+            self.close_button.show()
+            return
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(800, QApplication.quit)
 
 
 class Installer(QObject):
@@ -165,23 +284,7 @@ class Installer(QObject):
         if not install.wait_unlocked(folder, 15):
             raise RuntimeError("Ressy.exe è ancora in uso: chiudi Ressy e riprova.")
 
-        self.step.emit("Copio i file…", 15)
-        if exe.exists():
-            shutil.rmtree(folder / "_internal", ignore_errors=True)
-        folder.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(payload_path()) as zf:
-            members = [m for m in zf.infolist() if not m.is_dir()]
-            for i, member in enumerate(members):
-                parts = Path(member.filename).parts
-                rel = Path(*parts[1:]) if parts and parts[0] == "Ressy" else Path(*parts)
-                target = (folder / rel).resolve()
-                if folder.resolve() not in target.parents:
-                    raise RuntimeError(f"percorso non valido nel pacchetto: {member.filename}")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(member) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst, 1 << 20)
-                if i % 40 == 0:
-                    self.step.emit("Copio i file…", 15 + int(60 * i / max(1, len(members))))
+        copy_payload(folder, lambda pct: self.step.emit("Copio i file…", 15 + int(60 * pct)))
 
         self.step.emit("Salvo le impostazioni…", 78)
         if plan["server"]:
@@ -694,7 +797,11 @@ def main() -> int:
 
         QMessageBox.critical(None, "Ressy", "Il pacchetto di installazione è danneggiato: scaricalo di nuovo.")
         return 1
-    window = Setup()
+    folder = install.installed_dir() if UPDATE else None
+    if UPDATE and folder is not None and (folder / install.APP_EXE).exists():
+        window = UpdateWindow(folder)
+    else:
+        window = Setup()
     window.show()
     return app.exec()
 

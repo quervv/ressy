@@ -53,6 +53,7 @@ class Tray(QObject):
         menu.addAction("Collega Telegram o Discord…").triggered.connect(open_pairing)
         menu.addAction("Impostazioni…").triggered.connect(lambda: open_settings(""))
         menu.addSeparator()
+        self._quit_separator = menu.actions()[-1]
         menu.addAction("Esci da Ressy").triggered.connect(quit_app)
         self.menu = menu
         self.icon.setContextMenu(menu)
@@ -63,6 +64,15 @@ class Tray(QObject):
         bridge.toastRequested.connect(self.toast)
         self._refresh()
         self.icon.show()
+
+    def add_update_action(self, callback: Callable[[], None]):
+        from PySide6.QtGui import QAction
+
+        action = QAction("Aggiorna Ressy…", self.menu)
+        action.triggered.connect(callback)
+        action.setVisible(False)
+        self.menu.insertAction(self._quit_separator, action)
+        return action
 
     def _toggle_wake(self) -> None:
         if self.controller.awake:

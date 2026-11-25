@@ -281,3 +281,15 @@ def test_epic_and_steam_games_are_listed(monkeypatch, tmp_path):
         "Fortnite": "com.epicgames.launcher://apps/fn%3Aabc%3AFortnite?action=launch&silent=true",
         "Geometry Dash": "steam://rungameid/322170",
     }
+
+
+def test_shortcuts_on_desktop_and_taskbar_are_found(tmp_path):
+    from ressy.tools.apps import scan_shortcuts
+
+    (tmp_path / "Giochi").mkdir()
+    (tmp_path / "Giochi" / "Rocket League.url").write_text("[InternetShortcut]\nURL=steam://rungameid/252950\n")
+    (tmp_path / "OBS Studio.lnk").write_bytes(b"L")
+    (tmp_path / "Uninstall OBS.lnk").write_bytes(b"L")
+    (tmp_path / "notes.txt").write_text("x")
+    names = {e.name for e in scan_shortcuts([tmp_path])}
+    assert names == {"Rocket League", "OBS Studio"}

@@ -239,6 +239,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.fallback)
         self.quick = QCheckBox("Esegui i comandi semplici sul PC senza usare l'AI (apri app e siti, meteo, volume…)")
         layout.addWidget(self.quick)
+        self.auto_update = QCheckBox("Avvisami quando c'è una nuova versione di Ressy e installala con un clic")
+        layout.addWidget(self.auto_update)
 
         layout.addWidget(_section("Consumi delle chiavi"))
         self.usage_text = QLabel("")
@@ -467,6 +469,7 @@ class SettingsDialog(QDialog):
         )
         self.fallback.setChecked(s.llm_fallback)
         self.quick.setChecked(s.quick_commands)
+        self.auto_update.setChecked(s.auto_update)
         llm = getattr(self.controller, "llm", None)
         if llm is not None and hasattr(llm, "usage"):
             self._show_usage(llm.usage.report(s.providers_with_keys()))
@@ -605,6 +608,7 @@ class SettingsDialog(QDialog):
             **brain,
             "llm_fallback": self.fallback.isChecked(),
             "quick_commands": self.quick.isChecked(),
+            "auto_update": self.auto_update.isChecked(),
             **self.speech.values(),
             **self._voice_changes(),
             "sounds_enabled": self.sounds.isChecked(),

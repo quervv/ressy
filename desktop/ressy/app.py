@@ -142,6 +142,23 @@ def main(argv: list[str] | None = None) -> int:
     tray = Tray(controller, bridge, open_settings=open_settings, open_pairing=open_pairing, quit_app=app.quit)
     bridge.settingsRequested.connect(open_settings)
 
+    from .ui.update_dialog import UpdateChecker, UpdateDialog
+
+    update_dialog = UpdateDialog(quit_app=app.quit)
+    update_action = tray.add_update_action(lambda: update_dialog.offer(update_checker.release))
+    update_checker = UpdateChecker(lambda: controller.settings.auto_update)
+    offered: set[str] = set()
+
+    def on_update(release) -> None:
+        update_checker.release = release
+        update_action.setText(f"Aggiorna Ressy alla versione {release.version}…")
+        update_action.setVisible(True)
+        if release.version not in offered:
+            offered.add(release.version)
+            update_dialog.offer(release)
+
+    update_checker.found.connect(on_update)
+
     server = QLocalServer()
     QLocalServer.removeServer(_server_name())
     if server.listen(_server_name()):
@@ -171,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
     heartbeat.start(500)
     heartbeat.timeout.connect(lambda: None)
 
+    just_updated = bool(settings.last_version) and settings.last_version != __version__
+    if settings.last_version != __version__:
+        settings.last_version = __version__
+        settings.save()
+
+    if just_updated:
+        tray.toast("Ressy aggiornata", f"Ora hai la versione {__version__}.")
     if not settings.brain_ready:
         open_settings(
             "Benvenuto! Per iniziare scegli l'intelligenza di Ressy (Groq, Gemini, OpenRouter o Claude) e incolla la chiave. Poi tieni premuto "
