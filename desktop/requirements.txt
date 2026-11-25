@@ -1,0 +1,29 @@
+PySide6>=6.7,<7
+numpy>=1.26
+sounddevice>=0.4.7
+miniaudio>=1.59
+httpx>=0.27,<1
+aiohttp>=3.9,<4
+edge-tts>=7.0,<8
+pynput>=1.7.7
+psutil>=5.9
+Pillow>=10.3
+qrcode>=7.4
+webrtcvad-wheels>=2.0.14
+# your own bot, run inside the app (same as server/requirements.txt)
+aiosqlite>=0.20,<1
+python-telegram-bot>=21.6,<23
+discord.py>=2.4,<3
+tzdata>=2024.1
+# Windows' built-in OCR: Ressy reads the screen (Discord chats, click on a word)
+winrt-runtime>=3.0
+winrt-Windows.Media.Ocr>=3.0
+winrt-Windows.Graphics.Imaging>=3.0
+winrt-Windows.Storage.Streams>=3.0
+winrt-Windows.Globalization>=3.0
+winrt-Windows.Foundation>=3.0
+winrt-Windows.Foundation.Collections>=3.0
+# the brain: Groq (httpx), Claude (official SDK) or Gemini (httpx), each with the user's own key
+anthropic>=2.14,<3
+# understanding speech on this PC, free and offline: whisper.cpp with a small model (32-190 MB)
+pywhispercpp>=1.5,<2

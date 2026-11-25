@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Build output
+desktop/build/
+desktop/dist/
+desktop/build_release.log
+*.spec
+web/download/
+
+# Secrets and local data
+.env
+server/data/
+*.db
+*.sqlite3
+
+# Local tooling state
+.claude/settings.local.json

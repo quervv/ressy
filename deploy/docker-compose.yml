@@ -1,0 +1,37 @@
+# Ressy on one VPS: the bot server + Caddy (automatic HTTPS) serving the landing page.
+#   cp ../server/.env.example ../server/.env   # then fill TELEGRAM_BOT_TOKEN (and Discord)
+#   docker compose up -d --build
+services:
+  ressy-server:
+    build: ../server
+    env_file: ../server/.env
+    environment:
+      RESSY_DB_PATH: /data/ressy.db
+      RESSY_HOST: 0.0.0.0
+      RESSY_PORT: "8765"
+      RESSY_TRUST_PROXY: "1"
+    volumes:
+      - ressy-data:/data
+    expose:
+      - "8765"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - ressy-server
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../web:/srv/www:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  ressy-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,4 @@
+Provider logos (groq.svg, claude.svg, gemini.svg, openrouter.svg) come from LobeHub Icons
+(https://github.com/lobehub/lobe-icons), MIT License. The marks belong to
+Groq, Inc., Anthropic PBC, Google LLC and OpenRouter, Inc.; Ressy uses them only to show which
+service the user picks, and is not affiliated with any of them.

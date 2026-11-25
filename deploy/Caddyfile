@@ -1,0 +1,32 @@
+ressy.top {
+	encode zstd gzip
+
+	# Desktop agents keep a WebSocket open here (Caddy upgrades it transparently).
+	handle /ws/agent {
+		reverse_proxy ressy-server:8765
+	}
+
+	handle /health {
+		reverse_proxy ressy-server:8765
+	}
+
+	# The landing page.
+	handle {
+		root * /srv/www
+		file_server
+		header /assets/* Cache-Control "public, max-age=604800"
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+}
+
+www.ressy.top {
+	redir https://ressy.top{uri} permanent
+}

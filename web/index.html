@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ressy · tieni premuto K e parla con il tuo PC</title>
+<meta name="description" content="Ressy è l’assistente vocale gratuito e open source per Windows: tieni premuto K, di’ «Ressy, sveglia!» e lei apre i programmi, scrive su Discord e ti risponde a voce. Da Telegram e Discord la comandi anche quando sei fuori casa.">
+<link rel="canonical" href="https://ressy.top/">
+<meta name="theme-color" content="#17181C">
+<meta name="color-scheme" content="dark">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="it_IT">
+<meta property="og:site_name" content="Ressy">
+<meta property="og:title" content="Ressy · tieni premuto K e parla con il tuo PC">
+<meta property="og:description" content="L’assistente vocale per Windows che apre i programmi, scrive su Discord e ti risponde a voce. Gratis, open source, con la tua chiave Groq, Claude o Gemini.">
+<meta property="og:url" content="https://ressy.top/">
+<meta property="og:image" content="https://ressy.top/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Il tasto K viola di Ressy su una tastiera scura, con la scritta «Tieni premuto K e di’ Ressy, sveglia!»">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="assets/ressy-mark.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preload" href="fonts/archivo-vf.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+<script src="boot.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18M10 15.5l4-4m0 0h-3m3 0v3"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-6.5L8 21v-3.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z"/><path d="M7.5 10h9M7.5 13.5h6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="M10 9.2v5.6l4.8-2.8z"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-shot" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8m8 0h2.5A1.5 1.5 0 0 1 20 5.5V8m0 8v2.5a1.5 1.5 0 0 1-1.5 1.5H16m-8 0H5.5A1.5 1.5 0 0 1 4 18.5V16"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2H5z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M7.2 6.6a7.5 7.5 0 1 0 9.6 0"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18m-11 3.5 4 4m0-4-4 4"/></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h10v2M9 5v14M7 19h4"/><path d="M17.5 9v10M16 9h3M16 19h3"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M15.5 9.2a4 4 0 0 1 0 5.6M18 6.8a7.5 7.5 0 0 1 0 10.4"/></symbol>
+  <symbol id="i-enter" viewBox="0 0 24 24"><path d="M19 5v7.5a2 2 0 0 1-2 2H6"/><path d="M9.5 11 6 14.5 9.5 18"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5"/><path d="M4.5 19.5h15"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
+  <symbol id="enter-skirt" viewBox="0 0 150 200"><path d="M13.5 3.5H136.5Q146.5 3.5 146.5 13.5V186.5Q146.5 196.5 136.5 196.5H38.5Q28.5 196.5 28.5 186.5V102.5Q28.5 96.5 22.5 96.5H13.5Q3.5 96.5 3.5 86.5V13.5Q3.5 3.5 13.5 3.5Z"/></symbol>
+  <symbol id="enter-top" viewBox="0 0 150 200"><path d="M19.5 5.5H130.5Q138.5 5.5 138.5 13.5V174.5Q138.5 182.5 130.5 182.5H44.5Q36.5 182.5 36.5 174.5V94.5Q36.5 88.5 30.5 88.5H19.5Q11.5 88.5 11.5 80.5V13.5Q11.5 5.5 19.5 5.5Z"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Vai al contenuto</a>
+
+<header class="topbar">
+  <a class="brand" href="#top" aria-label="Ressy, torna all’inizio">
+    <svg class="mark brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g class="mark__bars"><rect class="mark__bar" style="--i:0;--h:18" x="4" y="21" width="8" height="18" rx="4"/><rect class="mark__bar" style="--i:1;--h:36" x="16" y="12" width="8" height="36" rx="4"/><rect class="mark__bar mark__bar--mid" style="--i:2;--h:54" x="28" y="3" width="8" height="54" rx="4"/><rect class="mark__bar" style="--i:3;--h:36" x="40" y="12" width="8" height="36" rx="4"/><rect class="mark__bar" style="--i:4;--h:18" x="52" y="21" width="8" height="18" rx="4"/></g></svg>
+    <span class="brand__word" aria-hidden="true">ressy</span>
+  </a>
+  <nav class="frow" aria-label="Sezioni">
+    <a class="kc fkey" href="#cosa-fa"><span class="kc__face"><span class="fkey__sub" aria-hidden="true">F1</span><span>Come funziona</span></span></a>
+    <a class="kc fkey" href="#da-remoto"><span class="kc__face"><span class="fkey__sub" aria-hidden="true">F2</span><span>Da remoto</span></span></a>
+    <a class="kc fkey" href="#la-tua-chiave"><span class="kc__face"><span class="fkey__sub" aria-hidden="true">F3</span><span>Privacy</span></span></a>
+    <a class="kc fkey" href="#domande"><span class="kc__face"><span class="fkey__sub" aria-hidden="true">F4</span><span>Domande</span></span></a>
+  </nav>
+</header>
+
+<main id="main">
+
+<section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="hero__copy">
+    <h1 id="hero-title">
+      <span class="hero__line">Tieni premuto <span class="kcap" aria-hidden="true"><span class="kcap__face">K</span></span><span class="sr">K</span></span>
+      <span class="hero__line hero__line--wake">e di’ «Ressy, sveglia!»</span>
+    </h1>
+    <p class="lede">Ressy è l’assistente vocale del tuo PC Windows: apre i programmi, scrive su Discord, cerca sul web e ti risponde a voce. Fuori casa la comandi da Telegram o da Discord.</p>
+    <ul class="facts">
+      <li>Gratis e open source</li>
+      <li>Windows 10 e 11</li>
+      <li>Con la tua chiave Groq, Claude o Gemini</li>
+    </ul>
+    <div class="hero__actions">
+      <a class="kc kc--accent enter-cta" href="https://github.com/quervv/ressy/releases/latest/download/Ressy-Setup.exe">
+        <span class="kc__face"><span>Scarica per Windows</span><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-down"/></svg></span>
+      </a>
+      <p class="try" id="try-hint">Provalo qui: tieni premuto il tasto <b>K</b>, sullo schermo o sulla tua tastiera.</p>
+      <a class="more" href="#cosa-fa">Come funziona</a>
+    </div>
+  </div>
+
+  <div class="board" role="group" aria-label="Demo: la tastiera di Ressy">
+    <div class="hud-slot">
+      <div class="hud hud--float" id="hud-hero" data-state="asleep" role="group" aria-label="Finestra di Ressy (demo)" hidden>
+        <div class="hud__top">
+          <span class="hud__mark" aria-hidden="true">
+            <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g class="mark__bars"><rect class="mark__bar" style="--i:0;--h:18" x="4" y="21" width="8" height="18" rx="4"/><rect class="mark__bar" style="--i:1;--h:36" x="16" y="12" width="8" height="36" rx="4"/><rect class="mark__bar mark__bar--mid" style="--i:2;--h:54" x="28" y="3" width="8" height="54" rx="4"/><rect class="mark__bar" style="--i:3;--h:36" x="40" y="12" width="8" height="36" rx="4"/><rect class="mark__bar" style="--i:4;--h:18" x="52" y="21" width="8" height="18" rx="4"/></g></svg>
+            <span class="hud__presence"></span>
+          </span>
+          <canvas class="hud__lines hud__lines--ressy" aria-hidden="true"></canvas>
+          <button class="kc hud__esc" type="button" data-action="sleep" aria-label="Metti Ressy a dormire" title="Metti Ressy a dormire"><span class="kc__face" aria-hidden="true">Esc</span></button>
+        </div>
+        <div class="hud__speech">
+          <span class="hud__legend" data-role="state">Dorme</span>
+          <p class="hud__say" data-role="say"></p>
+        </div>
+        <div class="hud__rule"></div>
+        <div class="hud__you">
+          <span class="hud__legend hud__legend--you">Tu</span>
+          <canvas class="hud__lines hud__lines--user" aria-hidden="true"></canvas>
+        </div>
+        <p class="hud__heard"><span data-role="heard"></span><span class="hud__tag" data-role="tag" hidden>esempio</span></p>
+      </div>
+    </div>
+
+    <div class="board__frame">
+      <div class="bezel">
+        <div class="switches">
+          <button class="kc toggle" type="button" data-toggle="mic" aria-pressed="false">
+            <span class="kc__face">
+              <span class="toggle__led" aria-hidden="true"></span>
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-mic"/></svg>
+              <span class="toggle__name">Microfono</span>
+              <span class="toggle__state" aria-hidden="true" data-on="acceso" data-off="spento">spento</span>
+            </span>
+          </button>
+          <button class="kc toggle" type="button" data-toggle="sound" aria-pressed="true">
+            <span class="kc__face">
+              <span class="toggle__led" aria-hidden="true"></span>
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-sound"/></svg>
+              <span class="toggle__name">Audio</span>
+              <span class="toggle__state" aria-hidden="true" data-on="acceso" data-off="spento">acceso</span>
+            </span>
+          </button>
+        </div>
+        <ul class="leds" aria-label="Stato di Ressy">
+          <li data-led="asleep" class="is-on" aria-current="true"><span class="led" aria-hidden="true"></span>Dorme</li>
+          <li data-led="listening"><span class="led" aria-hidden="true"></span>Ascolta</li>
+          <li data-led="thinking"><span class="led" aria-hidden="true"></span>Pensa</li>
+          <li data-led="speaking"><span class="led" aria-hidden="true"></span>Parla</li>
+        </ul>
+      </div>
+
+      <div class="keys">
+        <span class="key key--mod" data-code="Tab" style="--x:0;--y:0;--w:1.5" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--mod">Tab</span></span></span></span>
+        <span class="key" data-code="KeyQ" style="--x:1.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">Q</span></span></span></span>
+        <span class="key" data-code="KeyW" style="--x:2.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">W</span></span></span></span>
+        <span class="key" data-code="KeyE" style="--x:3.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">E</span></span></span></span>
+        <span class="key" data-code="KeyR" style="--x:4.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">R</span></span></span></span>
+        <span class="key" data-code="KeyT" style="--x:5.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">T</span></span></span></span>
+        <span class="key" data-code="KeyY" style="--x:6.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">Y</span></span></span></span>
+        <span class="key" data-code="KeyU" style="--x:7.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">U</span></span></span></span>
+        <span class="key" data-code="KeyI" style="--x:8.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">I</span></span></span></span>
+        <span class="key" data-code="KeyO" style="--x:9.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">O</span></span></span></span>
+        <span class="key" data-code="KeyP" style="--x:10.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">P</span></span></span></span>
+        <span class="key" data-code="BracketLeft" style="--x:11.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>é</span><span>è</span></span></span></span></span>
+        <span class="key" data-code="BracketRight" style="--x:12.5;--y:0" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>*</span><span>+</span></span></span></span></span>
+
+        <span class="key key--mod" data-code="CapsLock" style="--x:0;--y:1;--w:1.75" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--mod">Bloc Maiusc</span></span></span></span>
+        <span class="key" data-code="KeyA" style="--x:1.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">A</span></span></span></span>
+        <span class="key" data-code="KeyS" style="--x:2.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">S</span></span></span></span>
+        <span class="key" data-code="KeyD" style="--x:3.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">D</span></span></span></span>
+        <span class="key key--home" data-code="KeyF" style="--x:4.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">F</span></span></span></span>
+        <span class="key" data-code="KeyG" style="--x:5.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">G</span></span></span></span>
+        <span class="key" data-code="KeyH" style="--x:6.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">H</span></span></span></span>
+        <span class="key key--home" data-code="KeyJ" style="--x:7.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">J</span></span></span></span>
+        <button class="key key--accent key--talk" id="talk-key" type="button" data-code="KeyK" style="--x:8.75;--y:1" aria-label="K: tieni premuto per svegliare Ressy (demo)" aria-describedby="try-hint">
+          <span class="cap"><span class="face"><span class="lg" aria-hidden="true">K</span><span class="lg lg--front" aria-hidden="true">tieni premuto</span></span></span>
+        </button>
+        <span class="key" data-code="KeyL" style="--x:9.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">L</span></span></span></span>
+        <span class="key" data-code="Semicolon" style="--x:10.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>ç</span><span>ò</span></span></span></span></span>
+        <span class="key" data-code="Quote" style="--x:11.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>°</span><span>à</span></span></span></span></span>
+        <span class="key" data-code="Backslash" style="--x:12.75;--y:1" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>§</span><span>ù</span></span></span></span></span>
+
+        <span class="key key--mod" data-code="ShiftLeft" style="--x:0;--y:2;--w:1.25" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--mod">Maiusc</span></span></span></span>
+        <span class="key" data-code="IntlBackslash" style="--x:1.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>&gt;</span><span>&lt;</span></span></span></span></span>
+        <span class="key" data-code="KeyZ" style="--x:2.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">Z</span></span></span></span>
+        <span class="key" data-code="KeyX" style="--x:3.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">X</span></span></span></span>
+        <span class="key" data-code="KeyC" style="--x:4.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">C</span></span></span></span>
+        <span class="key" data-code="KeyV" style="--x:5.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">V</span></span></span></span>
+        <span class="key" data-code="KeyB" style="--x:6.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">B</span></span></span></span>
+        <span class="key" data-code="KeyN" style="--x:7.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">N</span></span></span></span>
+        <span class="key" data-code="KeyM" style="--x:8.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg">M</span></span></span></span>
+        <span class="key" data-code="Comma" style="--x:9.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>;</span><span>,</span></span></span></span></span>
+        <span class="key" data-code="Period" style="--x:10.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>:</span><span>.</span></span></span></span></span>
+        <span class="key" data-code="Slash" style="--x:11.25;--y:2" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--dual"><span>_</span><span>-</span></span></span></span></span>
+        <span class="key key--mod" data-code="ShiftRight" style="--x:12.25;--y:2;--w:2.75" aria-hidden="true"><span class="cap"><span class="face"><span class="lg lg--mod">Maiusc</span></span></span></span>
+
+        <a class="key key--enter" href="https://github.com/quervv/ressy/releases/latest/download/Ressy-Setup.exe" style="--x:13.5;--y:0;--w:1.5;--h:2">
+          <svg class="enter__shape" viewBox="0 0 150 200" aria-hidden="true" focusable="false"><use class="enter__skirt" href="#enter-skirt"/><use class="enter__top" href="#enter-top"/></svg>
+          <span class="enter__face">
+            <span class="enter__label">Scarica<br>per Windows</span>
+            <span class="enter__sub" aria-hidden="true">Invio <svg class="icon" focusable="false"><use href="#i-enter"/></svg></span>
+          </span>
+        </a>
+      </div>
+    </div>
+    <p class="board__note" data-role="board-note" aria-live="polite"></p>
+    <noscript><p class="board__note">Per provare la demo serve JavaScript.</p></noscript>
+  </div>
+  <p class="sr" aria-live="polite" data-role="announcer"></p>
+</section>
+
+<section class="sheet sheet--alpha" id="cosa-fa" aria-labelledby="tasks-title">
+  <div class="sheet__inner">
+    <header class="sheet__head">
+      <h2 id="tasks-title"><span>Le dici cosa fare.</span> <span>Lo fa, e te lo dice.</span></h2>
+      <p>Dieci cose che Ressy sa già fare sul tuo PC. Premi un tasto e guarda come risponde: con l’audio acceso la senti anche, e le sue linee si muovono mentre parla.</p>
+    </header>
+    <div class="novelties" role="group" aria-label="Esempi di comandi">
+      <button class="kc nkey" type="button" data-example="app" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-app"/></svg><span class="nkey__label">Programmi</span></span></button>
+      <button class="kc nkey" type="button" data-example="discord" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-chat"/></svg><span class="nkey__label">Discord</span></span></button>
+      <button class="kc nkey" type="button" data-example="youtube" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-play"/></svg><span class="nkey__label">YouTube</span></span></button>
+      <button class="kc nkey" type="button" data-example="music" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-music"/></svg><span class="nkey__label">Musica</span></span></button>
+      <button class="kc nkey" type="button" data-example="screenshot" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-shot"/></svg><span class="nkey__label">Screenshot</span></span></button>
+      <button class="kc nkey" type="button" data-example="reminder" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-bell"/></svg><span class="nkey__label">Promemoria</span></span></button>
+      <button class="kc nkey" type="button" data-example="web" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg><span class="nkey__label">Dal web</span></span></button>
+      <button class="kc nkey" type="button" data-example="power" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg><span class="nkey__label">Spegni</span></span></button>
+      <button class="kc nkey" type="button" data-example="close" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-close"/></svg><span class="nkey__label">Chiudi</span></span></button>
+      <button class="kc nkey" type="button" data-example="type" aria-pressed="false"><span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-type"/></svg><span class="nkey__label">Scrivi</span></span></button>
+    </div>
+    <div class="example">
+      <div class="hud hud--docked" id="hud-tasks" data-state="listening" role="group" aria-label="Finestra di Ressy (esempi)">
+        <div class="hud__top">
+          <span class="hud__mark" aria-hidden="true">
+            <svg class="mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g class="mark__bars"><rect class="mark__bar" style="--i:0;--h:18" x="4" y="21" width="8" height="18" rx="4"/><rect class="mark__bar" style="--i:1;--h:36" x="16" y="12" width="8" height="36" rx="4"/><rect class="mark__bar mark__bar--mid" style="--i:2;--h:54" x="28" y="3" width="8" height="54" rx="4"/><rect class="mark__bar" style="--i:3;--h:36" x="40" y="12" width="8" height="36" rx="4"/><rect class="mark__bar" style="--i:4;--h:18" x="52" y="21" width="8" height="18" rx="4"/></g></svg>
+            <span class="hud__presence"></span>
+          </span>
+          <canvas class="hud__lines hud__lines--ressy" aria-hidden="true"></canvas>
+        </div>
+        <div class="hud__speech">
+          <span class="hud__legend" data-role="state">Ascolta</span>
+          <p class="hud__say is-dim" data-role="say">Ciao! Cosa posso fare per te?</p>
+        </div>
+        <div class="hud__rule"></div>
+        <div class="hud__you">
+          <span class="hud__legend hud__legend--you">Tu</span>
+          <canvas class="hud__lines hud__lines--user" aria-hidden="true"></canvas>
+        </div>
+        <p class="hud__heard"><span data-role="heard"></span><span class="hud__tag" data-role="tag" hidden>esempio</span></p>
+      </div>
+      <div class="example__how">
+        <h3>Come lo fa</h3>
+        <p data-role="how" aria-live="polite">Ressy capisce la richiesta con l’intelligenza che hai scelto (Groq, Claude o Gemini), sceglie lo strumento giusto e lo usa sul tuo PC. Se qualcosa non va, te lo dice invece di far finta di niente.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sheet sheet--plate" id="da-remoto" aria-labelledby="remote-title">
+  <div class="sheet__inner">
+    <header class="sheet__head">
+      <h2 id="remote-title"><span>Fuori casa?</span> <span>Scrivile.</span></h2>
+      <p>Crei il tuo bot su Telegram o su Discord e Ressy lo fa girare: sul tuo PC, o su un tuo server sempre acceso. Non c’è un bot condiviso tra tutti, quindi nessun conflitto con gli altri. Scrivi o manda un vocale: Ressy esegue con la tua chiave e ti risponde, anche a voce.</p>
+    </header>
+    <div class="remote">
+      <figure class="chat">
+        <figcaption class="chat__head"><span>Chat con il tuo bot</span><span class="tag">esempio</span></figcaption>
+        <ol class="chat__log" data-role="chat" aria-live="polite">
+          <li class="msg msg--me">apri spotify</li>
+          <li class="msg msg--bot">Fatto, Spotify è aperto.</li>
+          <li class="msg msg--me msg--voice">
+            <span class="voice" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-mic"/></svg><span class="voice__wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="voice__time">0:03</span></span>
+            <span class="msg__caption">Vocale: «fammi uno screenshot»</span>
+          </li>
+          <li class="msg msg--bot msg--image"><span class="shot" aria-hidden="true"><span class="shot__window"></span><span class="shot__hud"></span><span class="shot__bar"></span></span><span>Ecco lo schermo.</span></li>
+        </ol>
+      </figure>
+      <div class="pc">
+        <div class="pc__board" data-role="pc-board" data-online="true" aria-hidden="true">
+          <span class="pkey" style="--w:1.25"><span class="kc__face">Ctrl</span></span><span class="pkey" style="--w:1.25"><span class="kc__face">Win</span></span><span class="pkey" style="--w:1.25"><span class="kc__face">Alt</span></span><span class="pkey pkey--space"><span class="kc__face"></span></span><span class="pkey" style="--w:1.25"><span class="kc__face">Alt Gr</span></span><span class="pkey pkey--full" style="--w:1.25"><span class="kc__face">Fn</span></span><span class="pkey pkey--full" style="--w:1.25"><span class="kc__face">Menu</span></span><span class="pkey" style="--w:1.25"><span class="kc__face">Ctrl</span></span>
+        </div>
+        <div class="pc__status">
+          <button class="kc power" type="button" data-action="power">
+            <span class="kc__face"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-power"/></svg><span data-label>Spegni il PC</span></span>
+          </button>
+          <p class="presence"><span class="presence__light" aria-hidden="true"></span><span>PC di casa:</span> <b data-role="presence">Online</b></p>
+        </div>
+        <p class="pc__note">La retroilluminazione è la presenza: accesa, il PC risponde; spenta, il comando non viene eseguito e il bot te lo dice. Se chiudi Ressy l’avviso arriva subito. Con Ressy Server sempre acceso, anche quando il PC si spegne o perde la rete; se il bot gira sul PC stesso, ti scrive appena il PC si riaccende e non esegue i messaggi arrivati nel frattempo.</p>
+      </div>
+    </div>
+    <div class="pairing">
+      <div class="pairing__code" role="img" aria-label="Codice d’esempio: 7KQ2XM">
+        <span class="ckey"><span class="kc__face">7</span></span><span class="ckey"><span class="kc__face">K</span></span><span class="ckey"><span class="kc__face">Q</span></span><span class="ckey"><span class="kc__face">2</span></span><span class="ckey"><span class="kc__face">X</span></span><span class="ckey"><span class="kc__face">M</span></span>
+      </div>
+      <div class="pairing__text">
+        <h3>Si collega con un codice</h3>
+        <p>Dall’icona di Ressy accanto all’orologio scegli «Collega Telegram o Discord». Su Telegram inquadri il QR code; su Discord scrivi al tuo bot <code>!collega</code> seguito dal codice. Il codice vale una volta sola e scade dopo 10 minuti.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sheet sheet--alpha" id="la-tua-chiave" aria-labelledby="specs-title">
+  <div class="sheet__inner">
+    <header class="sheet__head">
+      <h2 id="specs-title"><span>La chiave è tua.</span> <span>Il PC pure.</span></h2>
+      <p>Dove vanno la tua voce, la tua chiave e i tuoi comandi.</p>
+    </header>
+    <dl class="specs">
+      <div><dt>Chiave API</dt><dd>La tua. Resta sul PC, cifrata da Windows (DPAPI): le richieste all’IA partono da lì.</dd></div>
+      <div><dt>Il tuo bot</dt><dd>Lo crei tu e gira dentro Ressy sul tuo PC, o su un tuo server (Ressy Server, anche con Docker). Nessun server centrale: i tuoi messaggi passano solo da Telegram o Discord al tuo PC.</dd></div>
+      <div><dt>Microfono</dt><dd>Chiuso mentre Ressy dorme: si apre quando tieni premuto il tasto. Da sveglia ascolta finché le dici «vai a dormire» o resti in silenzio per 90 secondi.</dd></div>
+      <div><dt>Chi comanda</dt><dd>Solo gli account Telegram o Discord che colleghi tu con un codice. Ogni comando da remoto compare anche come notifica sul PC, a meno che tu non la spenga nelle impostazioni.</dd></div>
+      <div><dt>PC spento</dt><dd>Il comando non viene eseguito, nemmeno più tardi: niente comandi in coda che partono quando riaccendi. Con Ressy Server il bot ti avvisa subito.</dd></div>
+      <div><dt>Registri</dt><dd>Restano sul PC e non contengono il testo di quello che dici o scrivi.</dd></div>
+      <div><dt>Intelligenza</dt><dd>Scegli tu: Groq, Claude o Gemini, con la tua chiave. Per capirti un modello Whisper sul PC (da 32 a 190 MB, gratis e offline) oppure Groq o Gemini online.</dd></div>
+      <div><dt>Voce</dt><dd>Voci neurali Microsoft in italiano (Isabella, Elsa, Diego); se non vanno, la voce di Windows.</dd></div>
+      <div><dt>Sistema</dt><dd>Windows 10 e 11 a 64 bit. Il bot funziona da qualsiasi telefono con Telegram o Discord.</dd></div>
+      <div><dt>Licenza</dt><dd>MIT. Codice aperto, server del bot compreso.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="sheet sheet--plate" id="come-si-monta" aria-labelledby="setup-title">
+  <div class="sheet__inner">
+    <header class="sheet__head">
+      <h2 id="setup-title">Si monta in quattro tasti.</h2>
+      <p>Dal download alla prima parola, qualche minuto.</p>
+    </header>
+    <ol class="steps">
+      <li class="step"><span class="scap" aria-hidden="true"><span class="kc__face">1</span></span><h3>Installa</h3><p>Apri <b>Ressy-Setup.exe</b>: niente permessi da amministratore. Scegli lì anche dove gira il tuo bot. Ressy resta nell’area di notifica, accanto all’orologio.</p></li>
+      <li class="step"><span class="scap" aria-hidden="true"><span class="kc__face">2</span></span><h3>Incolla la chiave</h3><p>Scegli Groq, Claude o Gemini e incolla la tua chiave API: lo fai già nell’installer, che la verifica e scarica anche il modello vocale per il PC.</p></li>
+      <li class="step"><span class="scap" aria-hidden="true"><span class="kc__face">3</span></span><h3>Collega il telefono</h3><p>Crea il bot con @BotFather, incolla il token, poi inquadra il QR o scrivi il codice al tuo bot. Puoi farlo anche dopo.</p></li>
+      <li class="step step--k"><span class="scap" aria-hidden="true"><span class="kc__face">K</span></span><h3>Tieni premuto K</h3><p>e di’ «Ressy, sveglia!». Un tocco veloce scrive la lettera, come sempre.</p></li>
+    </ol>
+    <p class="smartscreen"><b>Windows potrebbe avvisarti.</b> Ressy non è firmata digitalmente, quindi al primo avvio può comparire «Windows ha protetto il PC»: scegli «Ulteriori informazioni» e poi «Esegui comunque».</p>
+  </div>
+</section>
+
+<section class="sheet sheet--alpha" id="domande" aria-labelledby="faq-title">
+  <div class="sheet__inner">
+    <header class="sheet__head">
+      <h2 id="faq-title">Domande</h2>
+    </header>
+    <div class="faq">
+      <details>
+        <summary><span>Quanto costa?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>Ressy è gratis e open source. Le richieste all’IA passano dal tuo account (Groq, Claude o Gemini): limiti ed eventuali costi sono quelli del tuo piano, non nostri. Con il modello vocale sul PC, capire la voce non consuma niente.</p>
+      </details>
+      <details>
+        <summary><span>Funziona su Mac o Linux?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>No, l’app è solo per Windows 10 e 11. Il bot invece lo usi da qualsiasi telefono o computer con Telegram o Discord.</p>
+      </details>
+      <details>
+        <summary><span>Cosa succede se il PC è spento?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>Il comando non viene eseguito. Con Ressy Server il bot ti scrive subito che Ressy è offline; se il bot gira sul PC, quando il PC si riaccende ti dice che è di nuovo online e che i messaggi arrivati nel frattempo non sono stati eseguiti. Gli avvisi li spegni e riaccendi con <code>/notifiche</code> su Telegram o <code>!notifiche</code> su Discord.</p>
+      </details>
+      <details>
+        <summary><span>Posso cambiare il tasto K?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>Sì: nelle impostazioni premi il tasto che vuoi e scegli per quanto tenerlo premuto. Un tocco veloce scrive la lettera come sempre; tenendolo premuto, nella finestra aperta la lettera compare al massimo una volta. Se ti dà fastidio, scegli un tasto che non scrive, come F8.</p>
+      </details>
+      <details>
+        <summary><span>Ressy registra quello che dico?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>No. Con il modello vocale sul PC la tua voce non esce dal PC; se scegli di trascriverla online va a Groq o Gemini, con la tua chiave, solo per essere trascritta. Ressy non la salva e i registri non contengono le tue parole.</p>
+      </details>
+      <details>
+        <summary><span>Chi può comandare il mio PC?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>Solo gli account che colleghi tu con un codice monouso. Li vedi e li scolleghi quando vuoi dalle impostazioni, alla voce «Da remoto».</p>
+      </details>
+      <details>
+        <summary><span>Perché un bot mio e non uno di tutti?</span><span class="mkey" aria-hidden="true"><svg class="icon" focusable="false"><use href="#i-plus"/></svg></span></summary>
+        <p>Un solo bot per tutti sarebbe un punto unico che smista i comandi di tutti i PC: un problema lì li ferma tutti, e i comandi di persone diverse passano dallo stesso posto. Con il tuo bot ogni Ressy è indipendente. Puoi farlo girare dentro Ressy, oppure installare Ressy Server su un PC sempre acceso (lo trovi nell’installer) o su un VPS con Docker Compose.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="close" id="scarica" aria-labelledby="close-title">
+  <div class="close__inner">
+    <div class="close__copy">
+      <h2 id="close-title">Premi Invio.</h2>
+      <ul class="close__facts">
+        <li>Windows 10 e 11, 64 bit</li>
+        <li>Gratis, licenza MIT</li>
+        <li>Serve una chiave API: Groq, Claude o Gemini</li>
+        <li><a href="https://github.com/quervv/ressy/releases/latest/download/Ressy-win64.zip">Versione portatile (zip)</a></li>
+        <li><a href="https://github.com/quervv/ressy">Codice sorgente (GitHub)</a></li>
+      </ul>
+    </div>
+    <a class="big-enter" href="https://github.com/quervv/ressy/releases/latest/download/Ressy-Setup.exe">
+      <svg class="enter__shape" viewBox="0 0 150 200" aria-hidden="true" focusable="false"><use class="enter__skirt" href="#enter-skirt"/><use class="enter__top" href="#enter-top"/></svg>
+      <span class="enter__face">
+        <span class="enter__label">Scarica Ressy<br>per Windows</span>
+        <span class="enter__sub" aria-hidden="true">Invio <svg class="icon" focusable="false"><use href="#i-enter"/></svg></span>
+      </span>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer__inner">
+    <a class="brand" href="#top" aria-label="Ressy, torna all’inizio">
+      <svg class="mark brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g class="mark__bars"><rect class="mark__bar" style="--i:0;--h:18" x="4" y="21" width="8" height="18" rx="4"/><rect class="mark__bar" style="--i:1;--h:36" x="16" y="12" width="8" height="36" rx="4"/><rect class="mark__bar mark__bar--mid" style="--i:2;--h:54" x="28" y="3" width="8" height="54" rx="4"/><rect class="mark__bar" style="--i:3;--h:36" x="40" y="12" width="8" height="36" rx="4"/><rect class="mark__bar" style="--i:4;--h:18" x="52" y="21" width="8" height="18" rx="4"/></g></svg>
+      <span class="brand__word" aria-hidden="true">ressy</span>
+    </a>
+    <p>Ressy è un progetto indipendente: non è affiliato a Telegram, Discord, Groq, Anthropic, Google o Microsoft. Le conversazioni in questa pagina sono esempi.</p>
+    <p>Software libero con licenza MIT.</p>
+  </div>
+</footer>
+</body>
+</html>
