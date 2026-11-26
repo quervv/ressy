@@ -290,13 +290,13 @@ async def timer_tool(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "reminder",
-        "Promemoria: action=add (text + minutes, oppure at 'HH:MM'), list, cancel (id o text).",
+        "Promemoria: add (text + minutes o at 'HH:MM'), list, cancel.",
         params(
             {
                 "action": {"type": "string", "enum": ["add", "list", "cancel"]},
                 "text": {"type": "string"},
-                "minutes": {"type": "number", "description": "tra quanti minuti"},
-                "at": {"type": "string", "description": "orario HH:MM (oggi, o domani se già passato)"},
+                "minutes": {"type": "number"},
+                "at": {"type": "string"},
                 "id": {"type": "string"},
             },
             ["action"],
@@ -305,7 +305,7 @@ TOOLS = [
     ),
     Tool(
         "timer",
-        "Timer, cronometro e azioni programmate (start con seconds/minutes + label/command, list, cancel, stopwatch_*).",
+        "Timer/cronometro: start (seconds/minutes + label/command), list, cancel, stopwatch_*.",
         params(
             {
                 "action": {
@@ -315,7 +315,7 @@ TOOLS = [
                 "seconds": {"type": "number"},
                 "minutes": {"type": "number"},
                 "label": {"type": "string"},
-                "command": {"type": "string", "description": "comando da eseguire allo scadere (es. metti in pausa)"},
+                "command": {"type": "string"},
                 "id": {"type": "string"},
             },
             ["action"],

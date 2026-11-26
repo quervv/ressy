@@ -156,6 +156,69 @@ def play_youtube(ctx: ToolContext, args: dict) -> str:
     return tr("Riproduco su YouTube: {title}.").format(title=title) if title else tr("Riproduco su YouTube il primo risultato per «{query}».").format(query=query)
 
 
+async def fallback_web_answer(question: str, *, language: str = "it") -> str:
+    lang = "en" if language == "en" else "it"
+    q = (question or "").strip()
+    if not q:
+        return ""
+    snippets: list[str] = []
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(8.0, connect=5.0),
+        headers={"User-Agent": _UA},
+        follow_redirects=True,
+    ) as client:
+        try:
+            r = await client.get(
+                "https://api.duckduckgo.com/",
+                params={"q": q, "format": "json", "no_html": "1", "skip_disambig": "1"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for key in ("Answer", "AbstractText", "Definition"):
+                    val = str(data.get(key) or "").strip()
+                    if val:
+                        snippets.append(val)
+                        break
+        except Exception:
+            pass
+
+        if not snippets:
+            try:
+                r = await client.post("https://html.duckduckgo.com/html/", data={"q": q, "kl": "it-it" if lang == "it" else "us-en"})
+                if r.status_code == 200:
+                    found = re.findall(r'class="result__snippet"[^>]*>(.*?)</(?:a|div)>', r.text, re.DOTALL | re.I)
+                    for raw in found[:3]:
+                        clean = html_lib.unescape(_HTML_TAGS.sub(" ", raw))
+                        clean = " ".join(clean.split())
+                        if clean:
+                            snippets.append(clean)
+            except Exception:
+                pass
+
+        if not snippets:
+            try:
+                sr = await client.get(
+                    f"https://{lang}.wikipedia.org/w/api.php",
+                    params={"action": "query", "list": "search", "srsearch": q, "srlimit": 1, "format": "json"},
+                )
+                hits = (sr.json().get("query") or {}).get("search") or []
+                if hits:
+                    title = str(hits[0].get("title") or "")
+                    if title:
+                        sum_r = await client.get(
+                            f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
+                        )
+                        if sum_r.status_code == 200:
+                            extract = str(sum_r.json().get("extract") or "").strip()
+                            if extract:
+                                snippets.append(extract)
+            except Exception:
+                pass
+
+    text = " ".join(snippets).strip()
+    return text[:900]
+
+
 async def web_answer(ctx: ToolContext, args: dict) -> str:
     question = args["question"].strip()
     if not question:
@@ -230,13 +293,13 @@ def compose_email(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "open_url",
-        "Apre un sito nel browser predefinito (indirizzo o nome noto, es. youtube, gmail).",
+        "Apre URL o sito noto nel browser.",
         params({"url": {"type": "string"}}, ["url"]),
         open_url,
     ),
     Tool(
         "web_search",
-        "Cerca nel browser su Google, YouTube, Amazon, Wikipedia, Maps, GitHub, Reddit, Translate o Immagini.",
+        "Cerca nel browser su Google, YouTube, Amazon, Wikipedia, Maps, GitHub, Reddit, Translate.",
         params(
             {
                 "query": {"type": "string"},
@@ -251,33 +314,27 @@ TOOLS = [
     ),
     Tool(
         "read_webpage",
-        "Scarica e legge il testo di una pagina web (per riassumerla o estrarne informazioni).",
+        "Legge testo di una pagina web.",
         params({"url": {"type": "string"}}, ["url"]),
         read_webpage,
         timeout=20,
     ),
     Tool(
         "compose_email",
-        "Apre una nuova bozza email nel client di posta con destinatario, oggetto e testo.",
-        params(
-            {
-                "to": {"type": "string"},
-                "subject": {"type": "string"},
-                "body": {"type": "string"},
-            }
-        ),
+        "Apre bozza email nel client di posta.",
+        params({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}),
         compose_email,
     ),
     Tool(
         "play_youtube",
-        "Cerca su YouTube e avvia il primo video (musica, video, tutorial).",
+        "Cerca e avvia video su YouTube.",
         params({"query": {"type": "string"}}, ["query"]),
         play_youtube,
         timeout=20,
     ),
     Tool(
         "web_answer",
-        "Cerca sul web e restituisce una risposta aggiornata (notizie, meteo, risultati, prezzi, fatti recenti).",
+        "Cerca sul web risposta aggiornata (notizie, prezzi, fatti recenti).",
         params({"question": {"type": "string"}}, ["question"]),
         web_answer,
         timeout=60,

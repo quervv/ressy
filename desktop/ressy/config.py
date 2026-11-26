@@ -20,7 +20,7 @@ LEGACY_SERVER_URL = "wss://ressy.top/ws/agent"
 DEFAULT_SERVER_PORT = 8765
 REMOTE_MODES = ("local", "server")
 DEFAULT_LLM_MODEL = "openai/gpt-oss-120b"
-LLM_FALLBACK_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b")
+LLM_FALLBACK_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile")
 DEFAULT_STT_MODEL = "whisper-large-v3"
 OLD_STT_DEFAULT = "whisper-large-v3-turbo"
 

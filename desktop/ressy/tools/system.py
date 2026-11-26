@@ -548,13 +548,13 @@ def system_control(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "media_control",
-        "Controlla la musica/video in riproduzione (Spotify, YouTube...).",
+        "Controlla media in riproduzione.",
         params({"action": {"type": "string", "enum": list(MEDIA_KEYS)}}, ["action"]),
         media_control,
     ),
     Tool(
         "set_volume",
-        "Volume del PC: level 0-100 per impostarlo, oppure change=up/down (steps da 2%) o mute.",
+        "Volume PC (level 0-100, change=up/down/mute).",
         params(
             {
                 "level": {"type": "integer"},
@@ -566,27 +566,26 @@ TOOLS = [
     ),
     Tool(
         "take_screenshot",
-        "Fa uno screenshot dello schermo o solo della finestra di un'app.",
-        params({"app": {"type": "string", "description": "nome app opzionale"}}),
+        "Screenshot schermo o finestra app.",
+        params({"app": {"type": "string"}}),
         take_screenshot,
     ),
     Tool(
         "pc_power",
-        "Blocca, sospende, spegne o riavvia il PC, o annulla uno spegnimento programmato.",
+        "Blocca, sospende, spegne o riavvia il PC.",
         params(
             {
                 "action": {"type": "string", "enum": ["lock", "sleep", "shutdown", "restart", "cancel"]},
-                "delay_seconds": {"type": "integer", "description": "per shutdown/restart, default 60"},
+                "delay_seconds": {"type": "integer"},
             },
             ["action"],
         ),
         pc_power,
     ),
-    Tool("system_status", "Stato del PC: CPU, RAM, disco, batteria, da quanto è acceso.", params(), system_status),
+    Tool("system_status", "Stato PC (CPU, RAM, disco, batteria).", params(), system_status),
     Tool(
         "system_control",
-        "Controlli PC: luminosità (brightness_set/up/down), dark_mode, light_mode, empty_recycle_bin, "
-        "top_processes, disk_space, network_info, open_settings.",
+        "Controlli PC: luminosità, dark/light mode, cestino, processi, disco, rete, impostazioni.",
         params(
             {
                 "action": {
@@ -596,8 +595,8 @@ TOOLS = [
                         "empty_recycle_bin", "top_processes", "disk_space", "network_info", "open_settings",
                     ],
                 },
-                "level": {"type": "integer", "description": "0-100 per brightness_set"},
-                "page": {"type": "string", "description": "wifi, bluetooth, sound, display, battery, updates, apps, privacy, main"},
+                "level": {"type": "integer"},
+                "page": {"type": "string"},
             },
             ["action"],
         ),
@@ -605,13 +604,13 @@ TOOLS = [
     ),
     Tool(
         "open_folder",
-        "Apre una cartella in Esplora file: Desktop, Documenti, Download… o una tua cartella per nome.",
+        "Apre cartella in Esplora file.",
         params({"name": {"type": "string"}}, ["name"]),
         open_folder,
     ),
     Tool(
         "type_text",
-        "Scrive del testo nella finestra attiva, come da tastiera.",
+        "Scrive testo nella finestra attiva.",
         params({"text": {"type": "string"}}, ["text"]),
         type_text,
         timeout=120,
@@ -620,7 +619,7 @@ TOOLS = [
     ),
     Tool(
         "press_keys",
-        "Preme una combinazione di tasti nella finestra attiva, es. 'ctrl+s', 'alt+tab', 'win+d', 'f5'.",
+        "Preme scorciatoia tasti (es. ctrl+s, alt+tab).",
         params({"keys": {"type": "string"}}, ["keys"]),
         press_keys,
         snapshot_on_error=True,
@@ -628,16 +627,15 @@ TOOLS = [
     ),
     Tool(
         "mouse_action",
-        "Scorre la rotella del mouse o clicca alle coordinate (scroll_down, scroll_up, scroll_left, "
-        "scroll_right, click, double_click, right_click).",
+        "Scroll o click mouse nella schermata.",
         params(
             {
                 "action": {
                     "type": "string",
                     "enum": ["scroll_down", "scroll_up", "scroll_left", "scroll_right", "click", "double_click", "right_click"],
                 },
-                "amount": {"type": "integer", "description": "scatti rotella (default 5)"},
-                "app": {"type": "string", "description": "app opzionale su cui agire"},
+                "amount": {"type": "integer"},
+                "app": {"type": "string"},
                 "x": {"type": "integer"},
                 "y": {"type": "integer"},
             },
@@ -649,17 +647,17 @@ TOOLS = [
     ),
     Tool(
         "set_clipboard",
-        "Copia un testo negli appunti di Windows.",
+        "Copia testo negli appunti.",
         params({"text": {"type": "string"}}, ["text"]),
         set_clipboard,
     ),
     Tool(
         "clipboard",
-        "Legge, imposta, incolla o svuota gli appunti di Windows (action: get, set, paste, clear).",
+        "Legge, imposta, incolla o svuota gli appunti.",
         params(
             {
                 "action": {"type": "string", "enum": ["get", "set", "paste", "clear"]},
-                "text": {"type": "string", "description": "testo da copiare se action=set"},
+                "text": {"type": "string"},
             },
             ["action"],
         ),

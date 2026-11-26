@@ -517,16 +517,12 @@ def read_discord_chat(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "send_discord_message",
-        "Invia un messaggio su Discord a un amico, a un canale o nella chat aperta (kind=current). "
-        "Apre Discord e trova la chat da solo: non chiamare open_app prima.",
+        "Invia messaggio Discord a amico, canale o chat aperta (kind=current). Apre Discord da solo.",
         params(
             {
-                "recipient": {"type": "string", "description": "nome dell'amico o del canale (senza @ o #) come lo ha "
-                                                              "detto l'utente; vuoto se kind=current"},
-                "message": {"type": "string", "description": "testo esatto da inviare, in prima persona come lo "
-                                                            "scriverebbe l'utente (es. «arrivo tra 10 minuti»)"},
-                "kind": {"type": "string", "enum": ["user", "channel", "current"],
-                         "description": "user = persona (default), channel = canale di un server, current = chat aperta"},
+                "recipient": {"type": "string", "description": "amico/canale (vuoto se current)"},
+                "message": {"type": "string", "description": "testo in prima persona"},
+                "kind": {"type": "string", "enum": ["user", "channel", "current"]},
             },
             ["message"],
         ),
@@ -537,10 +533,10 @@ TOOLS = [
     ),
     Tool(
         "read_discord_chat",
-        "Legge i messaggi visibili in una chat o canale Discord (o nella chat aperta).",
+        "Legge messaggi visibili in chat/canale Discord o chat aperta.",
         params(
             {
-                "recipient": {"type": "string", "description": "nome amico o canale (opzionale: vuoto = chat aperta)"},
+                "recipient": {"type": "string"},
                 "kind": {"type": "string", "enum": ["user", "channel", "current"]},
             },
         ),

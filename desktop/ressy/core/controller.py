@@ -510,7 +510,7 @@ class Controller:
         if not self.settings.brain_ready:
             self.ui.open_settings(self.settings.brain_problem)
             return
-        if self.player.playing or self.state == SPEAKING:
+        if self.player.playing or self.state in (SPEAKING, THINKING):
             self.speaker.interrupt()
             self._gen += 1
         try:
@@ -648,7 +648,7 @@ class Controller:
 
     async def _converse(self, text: str, gen: int) -> None:
         self._set_state(THINKING)
-        self.ui.status("")
+        self.ui.status(tr("Ci penso…"))
         progress = {"step": ""}
 
         def on_step(index: int, total: int, _text: str) -> None:
@@ -711,6 +711,9 @@ class Controller:
 
     async def _sleep_with_goodbye(self) -> None:
         await self._say(prompts.farewell(self.settings.language))
+        mem = getattr(self.brain, "memory", None)
+        if mem is not None:
+            mem.clear(VOICE.key)
         self._sleep_now(cue=False)
 
     def _sleep_now(self, cue: bool = True) -> None:

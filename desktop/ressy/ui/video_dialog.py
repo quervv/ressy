@@ -141,15 +141,43 @@ class VideoUploadDialog(QDialog):
         self.phrases = QLineEdit(", ".join(self._defaults.get("phrases") or []))
         self.phrases.setPlaceholderText(tr("Frasi ad impatto separate da virgola (opzionale)"))
 
+        self.transition = QComboBox()
+        self.transition.addItem(tr("Smooth Fade / Dissolve"), "smooth")
+        self.transition.addItem(tr("Zoom Whip dinamico"), "zoom_whip")
+        self.transition.addItem(tr("Flash cinematografico"), "flash")
+        self.transition.addItem(tr("Nessuna transizione (cut netti)"), "cut")
+        t_idx = self.transition.findData(str(self._defaults.get("transition") or "smooth"))
+        if t_idx >= 0:
+            self.transition.setCurrentIndex(t_idx)
+
+        self.color_grade = QComboBox()
+        self.color_grade.addItem(tr("Vivido / Social Pop"), "vivid")
+        self.color_grade.addItem(tr("Teal & Orange Cinematic"), "teal_orange")
+        self.color_grade.addItem(tr("Pellicola contrastata"), "cinematic_film")
+        self.color_grade.addItem(tr("Naturale (nessuna alterazione)"), "neutral")
+        c_idx = self.color_grade.findData(str(self._defaults.get("color_grade") or "vivid"))
+        if c_idx >= 0:
+            self.color_grade.setCurrentIndex(c_idx)
+
+        self.auto_captions = QCheckBox(tr("Sottotitoli automatici sincronizzati dall'audio"))
+        self.auto_captions.setChecked(bool(self._defaults.get("auto_captions", True)))
+
+        self.progress_bar = QCheckBox(tr("Barra di avanzamento moderna nella parte bassa"))
+        self.progress_bar.setChecked(bool(self._defaults.get("progress_bar", True)))
+
         self.render_preview = QCheckBox(tr("Esporta anche un MP4 finito pronto subito (oltre al progetto)"))
-        self.render_preview.setChecked(bool(self._defaults.get("render_preview")))
+        self.render_preview.setChecked(bool(self._defaults.get("render_preview", True)))
 
         form = QFormLayout()
         form.addRow(tr("Editor video"), self.editor)
         form.addRow(tr("Stile montaggio"), self.style)
         form.addRow(tr("Formato"), self.ratio)
+        form.addRow(tr("Transizioni"), self.transition)
+        form.addRow(tr("Color grading"), self.color_grade)
         form.addRow(tr("Titolo iniziale"), self.hook_title)
         form.addRow(tr("Frasi ad impatto"), self.phrases)
+        form.addRow("", self.auto_captions)
+        form.addRow("", self.progress_bar)
         form.addRow("", self.render_preview)
 
         self.error_lbl = QLabel()
@@ -219,8 +247,12 @@ class VideoUploadDialog(QDialog):
             "editor": str(self.editor.currentData() or "auto"),
             "style": str(self.style.currentData() or "viral"),
             "aspect_ratio": str(self.ratio.currentData() or "9:16"),
+            "transition": str(self.transition.currentData() or "smooth"),
+            "color_grade": str(self.color_grade.currentData() or "vivid"),
             "title": self.hook_title.text().strip(),
             "phrases": phrases,
+            "auto_captions": self.auto_captions.isChecked(),
+            "progress_bar": self.progress_bar.isChecked(),
             "render_preview": self.render_preview.isChecked(),
         }
         self.accept()

@@ -532,11 +532,14 @@ class LLMRouter:
                 if provider == "openrouter":
                     return await self.openrouter.web_answer(question, language=language)
                 return await self.groq.web_answer(question, language=language)
-            except GroqAuthError:
-                raise
             except GroqError as exc:
                 last = exc
-                log.warning("web answer with %s failed, trying the next brain", provider)
+                log.warning("web answer with %s failed (%s), trying next option", provider, exc)
+        from ..tools.web import fallback_web_answer
+
+        fallback = await fallback_web_answer(question, language=language)
+        if fallback:
+            return fallback
         raise last or GroqError(tr("Nessun servizio di ricerca disponibile."))
 
     async def list_models(self, key: str | None = None, provider: str | None = None) -> list[str]:

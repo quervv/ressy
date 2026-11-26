@@ -45,6 +45,12 @@ def resolve_path(name: str, folder: str = "") -> Path:
     name = name.strip().strip('"')
     if not name:
         raise ToolError(tr("Manca il nome del file."))
+    if not folder.strip() and not Path(name).is_absolute():
+        raw_name = name.replace("/", "\\") if sys.platform == "win32" else name
+        name_parts = Path(raw_name).parts
+        if len(name_parts) >= 2 and normalize(name_parts[0]) in FOLDERS:
+            folder = name_parts[0]
+            name = os.path.join(*name_parts[1:])
     key = normalize(folder) if folder else ""
     if key in FOLDERS:
         base = Path(winapi.known_folder(FOLDERS[key]) or _home() / "Desktop") if sys.platform == "win32" else user_folder(FOLDERS[key])
@@ -244,7 +250,7 @@ def find_files(ctx: ToolContext, args: dict) -> str:
     q_low = query.lower().lstrip("*")
     q_norm = normalize(query)
     deadline = time.monotonic() + 2.5
-    matches: list[tuple[int, Path]] = []
+    matches: list[tuple[int, float, Path]] = []
     seen: set[str] = set()
     queue: list[tuple[Path, int]] = [(r, 0) for r in roots if r.is_dir()]
     while queue and time.monotonic() < deadline and len(matches) < 25:
@@ -263,21 +269,22 @@ def find_files(ctx: ToolContext, args: dict) -> str:
                 continue
             try:
                 is_dir = entry.is_dir(follow_symlinks=False)
+                mtime = entry.stat(follow_symlinks=False).st_mtime
             except OSError:
                 continue
             if q_low in low or (q_norm and q_norm in normalize(entry.name)):
                 rank = 0 if low == q_low else (1 if low.startswith(q_low) else 2)
-                matches.append((rank, Path(entry.path)))
+                matches.append((rank, -mtime, Path(entry.path)))
             if is_dir and depth + 1 < 4:
                 queue.append((Path(entry.path), depth + 1))
     if not matches:
         return tr("Non ho trovato nessun file o cartella per «{query}».").format(query=query)
-    matches.sort(key=lambda item: (item[0], len(item[1].name), str(item[1])))
+    matches.sort(key=lambda item: (item[0], item[1], len(item[2].name)))
     if args.get("open"):
-        best = matches[0][1]
+        best = matches[0][2]
         platform_os.open_path(best)
         return tr("Ho trovato e aperto {name} ({where}).").format(name=best.name, where=where(best.parent))
-    lines = [f"- {p.name} ({where(p.parent)})" for _, p in matches[:12]]
+    lines = [f"- {p.name} ({where(p.parent)}) — {p}" for _, _, p in matches[:12]]
     return tr("Ho trovato {count} risultato/i:\n").format(count=len(matches)) + "\n".join(lines)
 
 
@@ -777,13 +784,12 @@ def download_file(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "create_file",
-        "Crea un file di testo (txt, md, csv, html, py, json…) nelle cartelle dell'utente. "
-        "mode: create (default), overwrite, append. open=true lo apre dopo.",
+        "Crea un file (txt, md, csv, html, py, json…) nelle cartelle utente. open=true lo apre.",
         params(
             {
-                "name": {"type": "string", "description": "nome del file, es. lista spesa.txt"},
+                "name": {"type": "string"},
                 "content": {"type": "string"},
-                "folder": {"type": "string", "description": "desktop (default), documenti, download… o un percorso"},
+                "folder": {"type": "string", "description": "desktop (default), documenti, download o percorso"},
                 "mode": {"type": "string", "enum": ["create", "overwrite", "append"]},
                 "open": {"type": "boolean"},
             },
@@ -793,20 +799,20 @@ TOOLS = [
     ),
     Tool(
         "create_folder",
-        "Crea una cartella (default sul desktop).",
+        "Crea una cartella (default Desktop).",
         params({"name": {"type": "string"}, "folder": {"type": "string"}}, ["name"]),
         create_folder,
     ),
     Tool(
         "file_action",
-        "Rinomina, sposta, copia, cestina, apre, comprime (zip) o estrae (unzip) un file o una cartella.",
+        "Rinomina, sposta, copia, cestina, apre, comprime o estrae file/cartella.",
         params(
             {
                 "action": {"type": "string", "enum": ["rename", "move", "copy", "delete", "zip", "unzip", "open"]},
-                "name": {"type": "string", "description": "file o cartella, es. foto.png"},
-                "folder": {"type": "string", "description": "dove si trova: desktop (default), documenti… o un percorso"},
-                "new_name": {"type": "string", "description": "per rename o zip"},
-                "destination": {"type": "string", "description": "cartella di arrivo, per move, copy, zip, unzip"},
+                "name": {"type": "string"},
+                "folder": {"type": "string"},
+                "new_name": {"type": "string"},
+                "destination": {"type": "string"},
             },
             ["action", "name"],
         ),
@@ -815,11 +821,11 @@ TOOLS = [
     ),
     Tool(
         "find_files",
-        "Cerca file o cartelle nelle cartelle dell'utente per nome o estensione (open=true per aprire il primo).",
+        "Cerca file o cartelle nelle cartelle utente (open=true apre il primo).",
         params(
             {
-                "query": {"type": "string", "description": "nome o estensione, es. relazione, .pdf"},
-                "folder": {"type": "string", "description": "cartella opzionale dove cercare"},
+                "query": {"type": "string"},
+                "folder": {"type": "string"},
                 "open": {"type": "boolean"},
             },
             ["query"],
@@ -828,12 +834,12 @@ TOOLS = [
     ),
     Tool(
         "notes",
-        "Note rapide e liste (es. spesa, cose da fare): action=add, list, remove, clear.",
+        "Note rapide e liste: add, list, remove, clear.",
         params(
             {
                 "action": {"type": "string", "enum": ["add", "list", "remove", "clear"]},
                 "text": {"type": "string"},
-                "category": {"type": "string", "description": "es. spesa, lavoro, generale"},
+                "category": {"type": "string"},
             },
             ["action"],
         ),
@@ -841,7 +847,7 @@ TOOLS = [
     ),
     Tool(
         "wait",
-        "Aspetta prima dell'azione successiva: seconds (1-120) oppure app = finché quel programma è aperto e pronto.",
+        "Attende seconds (1-120) o apertura app.",
         params({"seconds": {"type": "number"}, "app": {"type": "string"}}),
         wait,
         timeout=130,
@@ -854,14 +860,13 @@ TOOLS = [
     ),
     Tool(
         "list_folder",
-        "Elenca i file di una cartella (desktop, documenti, download… o un percorso).",
-        params({"folder": {"type": "string"}, "name": {"type": "string", "description": "sottocartella"}}),
+        "Elenca i file di una cartella (desktop, documenti, download o percorso).",
+        params({"folder": {"type": "string"}, "name": {"type": "string"}}),
         list_folder,
     ),
     Tool(
         "write_in_app",
-        "Apre (o usa) un'app e ci scrive un testo: Blocco note, Word, WhatsApp, chat, editor… "
-        "new_document=true per nuovo documento, press_enter=true per inviare, save_as=nome.",
+        "Apre o usa un'app (Blocco note, Word, WhatsApp...) e ci scrive text.",
         params(
             {
                 "app": {"type": "string"},
@@ -879,13 +884,13 @@ TOOLS = [
     ),
     Tool(
         "read_screen",
-        "Legge il testo visibile sullo schermo o nella finestra di un'app (per capire cosa c'è aperto).",
-        params({"app": {"type": "string", "description": "facoltativo"}}),
+        "Legge il testo visibile sullo schermo o in un'app.",
+        params({"app": {"type": "string"}}),
         read_screen,
     ),
     Tool(
         "click_text",
-        "Clicca su una scritta visibile sullo schermo (pulsante, link, voce di menu), facoltativamente in un'app.",
+        "Clicca un testo o pulsante visibile sullo schermo.",
         params(
             {
                 "text": {"type": "string"},
@@ -901,26 +906,26 @@ TOOLS = [
     ),
     Tool(
         "weather",
-        "Meteo attuale e previsioni (default: dove si trova il PC). Usalo per qualsiasi domanda sul tempo.",
-        params({"city": {"type": "string"}, "days": {"type": "integer", "description": "1-7, default 2"}}),
+        "Meteo attuale e previsioni.",
+        params({"city": {"type": "string"}, "days": {"type": "integer"}}),
         weather,
         timeout=25,
     ),
     Tool(
         "run_powershell",
-        "Esegue comandi PowerShell (Windows) o bash/zsh (macOS/Linux) sul computer per automazioni o controlli di sistema.",
+        "Esegue comandi PowerShell (Windows) o shell per automazioni e controlli.",
         params({"command": {"type": "string"}}, ["command"]),
         run_powershell,
         timeout=130,
     ),
     Tool(
         "run_python",
-        "Esegue qualsiasi script Python sul PC (automazione, file, grafici, PDF, dati, web, conversioni).",
+        "Esegue script Python sul PC (file, grafici, PDF, media, conversioni, automazioni).",
         params(
             {
-                "code": {"type": "string", "description": "codice Python completo da eseguire"},
-                "workdir": {"type": "string", "description": "cartella di lavoro opzionale"},
-                "timeout": {"type": "integer", "description": "secondi max (default 120)"},
+                "code": {"type": "string"},
+                "workdir": {"type": "string"},
+                "timeout": {"type": "integer"},
             },
             ["code"],
         ),
@@ -929,12 +934,12 @@ TOOLS = [
     ),
     Tool(
         "download_file",
-        "Scarica un file da qualsiasi URL http/https in Download o nella cartella scelta; open=true lo apre.",
+        "Scarica un file da URL in Download o folder.",
         params(
             {
                 "url": {"type": "string"},
-                "filename": {"type": "string", "description": "nome file opzionale"},
-                "folder": {"type": "string", "description": "cartella destinazione (default: download)"},
+                "filename": {"type": "string"},
+                "folder": {"type": "string"},
                 "open": {"type": "boolean"},
             },
             ["url"],

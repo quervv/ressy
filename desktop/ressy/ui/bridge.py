@@ -18,6 +18,7 @@ class UiBridge(QObject):
     toastRequested = Signal(str, str)
     settingsRequested = Signal(str)
     videoUploadRequested = Signal(object)
+    videoStudioUpdated = Signal(object)
 
     def state(self, state: str) -> None:
         self.stateChanged.emit(state)
@@ -60,3 +61,6 @@ class UiBridge(QObject):
 
     def request_video_upload(self, payload: dict) -> None:
         self.videoUploadRequested.emit(payload)
+
+    def update_video_studio(self, payload: dict) -> None:
+        self.videoStudioUpdated.emit(payload)

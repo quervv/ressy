@@ -1877,4 +1877,130 @@ EN: dict[str, str] = {
         'This script could harm the system: I will not run it.',
     'Scarico il file…':
         'Downloading file…',
+    'Audio':
+        'Audio',
+    'Sfondo dinamico':
+        'Dynamic backdrop',
+    'Non trovo questi file video: {files}. Controlla il nome o il percorso.{hint}':
+        'Cannot find these video files: {files}. Check the file name or path.{hint}',
+    'Studio avviato · analisi di {n} clip ({dur:.1f}s)…':
+        'Studio started · analyzing {n} clips ({dur:.1f}s)…',
+    'Analisi clip video…':
+        'Analyzing video clips…',
+    'Sorgente ({w}×{h})':
+        'Source ({w}×{h})',
+    'Creazione sfondo dinamico & preparazione color grading ({grade})…':
+        'Building dynamic backdrop & preparing color grading ({grade})…',
+    'Creo sfondo & look…':
+        'Creating backdrop & look…',
+    'Sfondo & color grading ({grade})':
+        'Backdrop & color grading ({grade})',
+    'Trascrizione audio & generazione titoli / sottotitoli sincronizzati…':
+        'Transcribing audio & generating synced titles / captions…',
+    'Genero sottotitoli…':
+        'Generating captions…',
+    'Compositing titoli ({n} card)':
+        'Compositing titles ({n} cards)',
+    'Applico keyframe zoom, transizioni ({tr}) e auto-ducking audio…':
+        'Applying zoom keyframes, transitions ({tr}) and audio ducking…',
+    'Applico transizioni & FX…':
+        'Applying transitions & FX…',
+    'Costruisco la timeline completa su {editor}…':
+        'Building the full timeline in {editor}…',
+    'Esporto timeline {editor}…':
+        'Exporting {editor} timeline…',
+    'CapCut non supportato su Linux.':
+        'CapCut is not supported on Linux.',
+    'Apertura progetto in CapCut…':
+        'Opening project in CapCut…',
+    'Esportazione MP4 finale & apertura automatica di CapCut…':
+        'Exporting final MP4 & auto-opening CapCut…',
+    'Apro CapCut…':
+        'Opening CapCut…',
+    'Render video finale…':
+        'Rendering final video…',
+    'Render finale MP4':
+        'Final MP4 render',
+    'Editing completato su CapCut!':
+        'CapCut editing complete!',
+    'Video pronto!':
+        'Video ready!',
+    'Invio timeline a DaVinci Resolve & render anteprima…':
+        'Sending timeline to DaVinci Resolve & rendering preview…',
+    'Apro DaVinci Resolve…':
+        'Opening DaVinci Resolve…',
+    'Editing completato!':
+        'Editing complete!',
+    'Video disponibili trovati: {names}.':
+        'Available videos found: {names}.',
+    'Smooth Fade / Dissolve':
+        'Smooth Fade / Dissolve',
+    'Zoom Whip dinamico':
+        'Dynamic Zoom Whip',
+    'Flash cinematografico':
+        'Cinematic Flash',
+    'Nessuna transizione (cut netti)':
+        'No transition (hard cuts)',
+    'Vivido / Social Pop':
+        'Vivid / Social Pop',
+    'Teal & Orange Cinematic':
+        'Teal & Orange Cinematic',
+    'Pellicola contrastata':
+        'High-contrast Film',
+    'Naturale (nessuna alterazione)':
+        'Natural (no grading)',
+    "Sottotitoli automatici sincronizzati dall'audio":
+        'Auto captions synced from audio',
+    'Barra di avanzamento moderna nella parte bassa':
+        'Modern bottom progress bar',
+    'Transizioni':
+        'Transitions',
+    'Color grading':
+        'Color grading',
+    'Ressy Studio · Live Editing':
+        'Ressy Studio · Live Editing',
+    'Nuovo progetto video':
+        'New video project',
+    'In preparazione':
+        'Preparing',
+    'ANTEPRIMA COMPOSITO LIVE':
+        'LIVE COMPOSITE PREVIEW',
+    'In attesa dei fotogrammi…':
+        'Waiting for frames…',
+    "L'anteprima visiva comparirà qui durante il montaggio…":
+        'The visual preview will appear here while editing…',
+    'Preparazione pipeline di montaggio…':
+        'Preparing editing pipeline…',
+    'OPERAZIONI DI EDITING':
+        'EDITING PIPELINE',
+    'Analisi clip & audio':
+        'Clip & audio analysis',
+    'Sfondo studio & grafiche':
+        'Studio backdrop & graphics',
+    'Trascrizione & sottotitoli':
+        'Transcription & captions',
+    'REGISTRO STUDIO':
+        'STUDIO LOG',
+    'Color grading, FX & transizioni':
+        'Color grading, FX & transitions',
+    'Timeline, keyframe & progetto':
+        'Timeline, keyframes & project',
+    'Apri video finale':
+        'Open final video',
+    'Render MP4 & apertura editor':
+        'MP4 render & open editor',
+    'Apri cartella progetto':
+        'Open project folder',
+    'Editing live':
+        'Editing live',
+    'Caricamento fotogrammi in corso…':
+        'Loading frames…',
+    'Analisi':
+        'Analysis',
+    'Avvio studio di montaggio…':
+        'Starting editing studio…',
+    'Completato':
+        'Completed',
+    'Errore':
+        'Error',
 }

@@ -17,8 +17,54 @@ log = logging.getLogger("ressy.brain")
 
 MAX_STEPS = 16
 MAX_CALLS_PER_STEP = 10
+MAX_CONTEXT_TURNS = 3
+MAX_MEMORY_CHARS = 500
 _INVISIBLE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in (
     (0x200B, 0x200F), (0x2028, 0x202E), (0x2060, 0x2064), (0xFEFF, 0xFEFF))) + "]")
+
+_FOLLOWUP_CUE = re.compile(
+    r"(?:^(?:e|ed|ma|per[oò]|invece|anzi|allora|quindi|poi|dopo|ancora|anche|pure|riprova|continua|aggiungi|"
+    r"aspetta|no|s[iì]|ok|okay|va bene|and|but|instead|then|also|too|again|retry|continue|add|wait|yes|no)\b|"
+    r"\b(?:quell[oaie]|quest[oaie]|stess[oaie]|precedente|prima|sopra|appena|scors[oa]|avevo chiesto|"
+    r"that|those|these|this one|it|them|him|her|previous|earlier|before|above|same|again|instead)\b|"
+    r"^(?:lo|la|li|le|gli|glielo|gliela|glieli|gliele|ne|ci)\s+|"
+    r"\b(?:apri|chiudi|avvia|lancia|scrivi|manda|invia|rispondi|crea|cancella|elimina|metti|fai|cerca|trova|"
+    r"leggi|copia|incolla|salva|sposta|rinomina|esegui|scarica|edita|monta|aggiungi|togli|dici|di'|fall|fagl|"
+    r"digl|dill|dagl|open|close|run|send|write|edit|delete|move|copy|save)(?:lo|la|li|le|gli|glielo|gliela|glieli|gliele|ci|ne)\b)",
+    re.IGNORECASE,
+)
+_QUESTION_ASKED = re.compile(
+    r"(?:\?\s*$|forse intendevi|controlla il nome|carica o dimmi|a chi devo|quale |che file|"
+    r"maybe you meant|check the .*name|upload or tell me|who should|which )",
+    re.IGNORECASE,
+)
+_STANDALONE_START = re.compile(
+    r"^\W*(?:ressy\W+)?(?:puoi\s+|potresti\s+|per\s+favore\s+|can\s+you\s+|could\s+you\s+|please\s+)?"
+    r"(?:apri\w*|avvia\w*|lancia\w*|chiudi\w*|cerca\w*|trova\w*|crea\w*|scarica\w*|esegui\w*|edita\w*|monta\w*|"
+    r"scriv\w*\s+(?:a|su|in|nel|nella)\s+|mand\w*\s+(?:a|su)\s+|invi\w*\s+(?:a|su)\s+|"
+    r"che\s+(?:ore|giorno|tempo|meteo)\b|quant[oa]\s+(?:fa|e|è|resta|rimane)\b|quanti\s+(?:timer|promemoria)\b|"
+    r"metti\s+(?:un\s+timer|in\s+pausa|il\s+volume)|alza|abbassa|muta|smuta|fai\s+(?:uno\s+)?screenshot|"
+    r"ricordami|open|launch|start|close|search|find|create|download|run|edit|play|what\s+time|what(?:'s|\s+is)\s+the\s+(?:time|weather))\b",
+    re.IGNORECASE,
+)
+_REFUSAL = re.compile(
+    r"(?:\bnon\s+(?:posso|riesco|sono\s+in\s+grado|ho\s+(?:uno\s+strumento|accesso|modo|la\s+possibilit[aà]))\b|"
+    r"\bnon\s+[eè]\s+possibile\b|\bmi\s+dispiace\b|\bpurtroppo\s+non\b|"
+    r"\bquesto\s+con\s+l'ai\s+sul\s+pc\s+non\s+riesco\b|"
+    r"\b(?:i\s+(?:can't|cannot)|i(?:'m|\s+am)\s+unable|i\s+don't\s+have\s+(?:a\s+tool|access)|not\s+possible)\b)",
+    re.IGNORECASE,
+)
+_REAL_BLOCK = re.compile(
+    r"(?:chiave\s+api|api\s+key|pc\s+[eè]\s+bloccato|pc\s+is\s+locked|microfono|microphone|"
+    r"non\s+sembra\s+installato|not\s+seem\s+installed|permessi\s+insufficienti|insufficient\s+permissions|"
+    r"cartelle\s+di\s+sistema|system\s+folders)",
+    re.IGNORECASE,
+)
+_FAKE_DONE = re.compile(
+    r"^\s*(?:fatto\b|ho\s+(?:aperto|avviato|scritto|mandato|inviato|messo|chiuso|cercato|impostato|creato|scaricato|eseguito)|"
+    r"done\b|i(?:'ve|\s+have)?\s+(?:opened|started|written|sent|closed|created|downloaded|executed))\b",
+    re.IGNORECASE,
+)
 
 LOOKING = frozenset({
     "list_windows", "read_screen", "list_folder", "read_file", "system_status",
@@ -100,6 +146,40 @@ def _not_run(text: str) -> str:
     return json.dumps({"ok": False, "errore": text}, ensure_ascii=False)
 
 
+def _is_followup(text: str, history: list[dict[str, Any]]) -> bool:
+    if not history:
+        return False
+    cleaned = re.sub(r"\s+", " ", (text or "")).strip()
+    if not cleaned:
+        return False
+    if _FOLLOWUP_CUE.search(cleaned):
+        return True
+    last_assistant = next((str(m.get("content") or "") for m in reversed(history) if m.get("role") == "assistant"), "")
+    asked_question = bool(_QUESTION_ASKED.search(last_assistant))
+    words = re.findall(r"[\w'’]+", cleaned)
+    if _STANDALONE_START.match(cleaned):
+        return False
+    if asked_question:
+        return True
+    return len(words) <= 4
+
+
+def _should_nudge(answer: str, turn: _Turn, user_text: str, nudged: bool) -> bool:
+    if nudged or turn.ctx.performed:
+        return False
+    text = (answer or "").strip()
+    if not text or text.endswith("?") or _REAL_BLOCK.search(text):
+        return False
+    if _REFUSAL.search(text):
+        return True
+    if _FAKE_DONE.match(text):
+        from . import quick
+
+        if quick.match(user_text) is None:
+            return True
+    return False
+
+
 class Brain:
     def __init__(self, settings: Settings, llm: Any, registry: ToolRegistry, services: Any) -> None:
         self.settings = settings
@@ -118,7 +198,7 @@ class Brain:
             steps = await self._plan(text)
             if len(steps) > 1:
                 log.info("request split into %d steps", len(steps))
-                answer = await self._run_plan(steps, turn, on_step)
+                answer = await self._run_plan(steps, text, turn, on_step)
                 self.memory.add(channel.key, text, answer)
                 return self._result(answer, ctx)
         if getattr(self.settings, "quick_commands", True):
@@ -126,7 +206,7 @@ class Brain:
             if fast is not None:
                 self.memory.add(channel.key, text, fast)
                 return self._result(fast, ctx)
-        answer = await self._converse(self._messages(channel, text), turn)
+        answer = await self._converse(self._messages(channel, text), turn, user_text=text)
         self.memory.add(channel.key, text, answer)
         return self._result(answer, ctx)
 
@@ -139,7 +219,20 @@ class Brain:
             deferred=ctx.deferred,
         )
 
-    def _messages(self, channel: Channel, text: str) -> list[dict[str, Any]]:
+    def _select_history(self, channel: Channel, probe_text: str) -> list[dict[str, Any]]:
+        history = self.memory.history(channel.key)
+        if not _is_followup(probe_text, history):
+            return []
+        recent = history[-(MAX_CONTEXT_TURNS * 2):]
+        trimmed: list[dict[str, Any]] = []
+        for msg in recent:
+            content = str(msg.get("content") or "")
+            if msg.get("role") == "assistant" and len(content) > MAX_MEMORY_CHARS:
+                content = content[: MAX_MEMORY_CHARS - 1] + "…"
+            trimmed.append({"role": msg.get("role", "user"), "content": content})
+        return trimmed
+
+    def _messages(self, channel: Channel, text: str, *, probe_text: str | None = None) -> list[dict[str, Any]]:
         return [
             {
                 "role": "system",
@@ -148,7 +241,7 @@ class Brain:
                     language=getattr(self.settings, "language", "it"),
                 ),
             },
-            *self.memory.history(channel.key),
+            *self._select_history(channel, text if probe_text is None else probe_text),
             {"role": "user", "content": text},
         ]
 
@@ -162,16 +255,37 @@ class Brain:
         except Exception:
             return False
 
-    async def _converse(self, messages: list[dict[str, Any]], turn: _Turn) -> str:
+    def _recovery_nudge(self, user_text: str) -> str:
+        if getattr(self.settings, "language", "it") == "en":
+            return (
+                f"Do NOT refuse or pretend it is done. Solve the current request («{user_text}») right now using "
+                "your tools: open_app, find_files, web_answer, read_webpage, download_file, run_python, "
+                "run_powershell, read_screen + click_text, write_in_app or press_keys."
+            )
+        return (
+            f"NON dire «non posso» e non fingere di averlo fatto. Risolvi subito la richiesta attuale («{user_text}») "
+            "usando gli strumenti: open_app, find_files, web_answer, read_webpage, download_file, run_python, "
+            "run_powershell, read_screen + click_text, write_in_app o press_keys."
+        )
+
+    async def _converse(self, messages: list[dict[str, Any]], turn: _Turn, *, user_text: str = "") -> str:
         tools = self.registry.schemas(turn.ctx.channel)
         models = self._models()
         answer: str | None = None
+        nudged = False
         for step in range(MAX_STEPS):
             result = await self.llm.chat(messages, models=models, tools=tools, tool_choice="auto")
             message = result.message
             calls = message.get("tool_calls") or []
             if not calls:
-                answer = clean_answer(str(message.get("content") or ""))
+                candidate = clean_answer(str(message.get("content") or ""))
+                if step < MAX_STEPS - 1 and _should_nudge(candidate, turn, user_text, nudged):
+                    nudged = True
+                    messages.append({"role": "assistant", "content": candidate})
+                    messages.append({"role": "user", "content": self._recovery_nudge(user_text)})
+                    log.info("intercepted refusal/pretend-done, nudging model to solve with tools")
+                    continue
+                answer = candidate
                 break
             await self._run_calls(message, calls, messages, turn, step)
             log.debug("step %d done with %d tool call(s) on %s", step + 1, len(calls), result.model)
@@ -253,7 +367,7 @@ class Brain:
             return planner.fallback_plan(text)
         return steps
 
-    async def _run_plan(self, steps: list[planner.Step], turn: _Turn, on_step: StepHook | None) -> str:
+    async def _run_plan(self, steps: list[planner.Step], request_text: str, turn: _Turn, on_step: StepHook | None) -> str:
         outcomes: list[tuple[planner.Step, _StepOutcome]] = []
         previous_ok = True
         for index, step in enumerate(steps, 1):
@@ -266,7 +380,7 @@ class Brain:
                     on_step(index, len(steps), step.text)
                 except Exception:
                     log.debug("on_step callback failed", exc_info=True)
-            outcome = await self._do_step(step, index, len(steps), outcomes, turn)
+            outcome = await self._do_step(step, index, len(steps), outcomes, request_text, turn)
             log.info("step %d/%d %s", index, len(steps), outcome.status)
             outcomes.append((step, outcome))
             previous_ok = outcome.status == "done"
@@ -275,13 +389,13 @@ class Brain:
         return self._plan_answer(steps, outcomes)
 
     async def _do_step(self, step: planner.Step, index: int, total: int,
-                       outcomes: list[tuple[planner.Step, _StepOutcome]], turn: _Turn) -> _StepOutcome:
+                       outcomes: list[tuple[planner.Step, _StepOutcome]], request_text: str, turn: _Turn) -> _StepOutcome:
         if getattr(self.settings, "quick_commands", True):
             fast = await self._quick_answer(step.text, turn)
             if fast is not None:
                 return _StepOutcome("done", fast)
         note = self._step_note(step, index, total, outcomes, compact=self._on_pc())
-        messages = self._messages(turn.ctx.channel, note)
+        messages = self._messages(turn.ctx.channel, note, probe_text=request_text)
         return await self._step_loop(messages, step, turn)
 
     def _step_note(self, step: planner.Step, index: int, total: int,
@@ -314,12 +428,19 @@ class Brain:
         models = self._models()
         last: _Call | None = None
         gathered: list[str] = []
+        nudged = False
         for round_ in range(MAX_CALLS_PER_STEP):
             result = await self.llm.chat(messages, models=models, tools=tools, tool_choice="auto")
             message = result.message
             calls = message.get("tool_calls") or []
             if not calls:
                 answer = clean_answer(str(message.get("content") or ""))
+                if round_ < MAX_CALLS_PER_STEP - 1 and _should_nudge(answer, turn, step.text, nudged):
+                    nudged = True
+                    messages.append({"role": "assistant", "content": answer})
+                    messages.append({"role": "user", "content": self._recovery_nudge(step.text)})
+                    log.info("step intercepted refusal/pretend-done, nudging model to solve with tools")
+                    continue
                 ctx_text = "\n".join(gathered)[:900]
                 if last is None:
                     return _StepOutcome("asked" if answer.endswith("?") else "done", answer, ctx_text)

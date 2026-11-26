@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import difflib
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from ..i18n import tr
 from ..paths import user_folder, videos_dir
@@ -228,6 +229,54 @@ def _choose_editor(wanted: str) -> str:
     return "davinci" if platform_os.IS_LINUX else "capcut"
 
 
+_EXT_TYPOS = {
+    ".mpp4": ".mp4",
+    ".mpeg4": ".mp4",
+    ".mp44": ".mp4",
+    ".moov": ".mov",
+    ".mkw": ".mkv",
+    ".wbm": ".webm",
+    ".m4vv": ".m4v",
+}
+
+
+def _iter_media_candidates(roots: list[Path], max_depth: int = 3) -> list[Path]:
+    found: list[Path] = []
+    exts = set(_VIDEO_EXTS + _AUDIO_EXTS)
+    for root in roots:
+        if not root.is_dir():
+            continue
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack:
+            cur, depth = stack.pop()
+            try:
+                entries = list(cur.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                name_low = entry.name.lower()
+                if entry.is_file() and entry.suffix.lower() in exts:
+                    found.append(entry)
+                elif entry.is_dir() and depth < max_depth and not name_low.startswith((".", "$", "ressy edits")):
+                    stack.append((entry, depth + 1))
+    return found
+
+
+def _recent_media_hint(limit: int = 5) -> str:
+    roots = [
+        user_folder("videos"),
+        user_folder("downloads"),
+        user_folder("desktop"),
+        user_folder("documents"),
+    ]
+    vids = [p for p in _iter_media_candidates(roots, max_depth=2) if p.suffix.lower() in _VIDEO_EXTS]
+    if not vids:
+        return ""
+    vids.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
+    names = ", ".join(str(p) for p in vids[:limit])
+    return tr("Video disponibili trovati: {names}.").format(names=names)
+
+
 def _resolve_media_file(raw: str) -> Path | None:
     text = raw.strip().strip('"').strip("'")
     if not text:
@@ -235,23 +284,57 @@ def _resolve_media_file(raw: str) -> Path | None:
     expanded = Path(os.path.expandvars(os.path.expanduser(text)))
     if expanded.is_file():
         return expanded.resolve()
+
+    suf_low = expanded.suffix.lower()
+    if suf_low in _EXT_TYPOS:
+        fixed = expanded.with_suffix(_EXT_TYPOS[suf_low])
+        if fixed.is_file():
+            return fixed.resolve()
+
     roots = [
         user_folder("videos"),
         user_folder("downloads"),
         user_folder("desktop"),
         user_folder("documents"),
     ]
-    q_low = text.lower()
+    base_name = Path(text).name
+    cand_names = [text, base_name]
+    b_suf = Path(base_name).suffix.lower()
+    if b_suf in _EXT_TYPOS:
+        fixed_name = str(Path(base_name).with_suffix(_EXT_TYPOS[b_suf]))
+        cand_names.append(fixed_name)
+    else:
+        fixed_name = base_name
+
     for root in roots:
         if not root.is_dir():
             continue
-        direct = root / text
-        if direct.is_file():
-            return direct.resolve()
-        for entry in root.iterdir():
-            if entry.is_file() and (entry.name.lower() == q_low or q_low in entry.stem.lower()):
-                if entry.suffix.lower() in (_VIDEO_EXTS + _AUDIO_EXTS):
-                    return entry.resolve()
+        for cname in cand_names:
+            direct = root / cname
+            if direct.is_file():
+                return direct.resolve()
+
+    candidates = _iter_media_candidates(roots, max_depth=3)
+    q_stem = Path(fixed_name).stem.lower()
+    q_full = fixed_name.lower()
+    best_path: Path | None = None
+    best_score = 0.0
+    for entry in candidates:
+        e_full = entry.name.lower()
+        e_stem = entry.stem.lower()
+        if e_full == q_full:
+            return entry.resolve()
+        if q_stem and q_stem == e_stem:
+            score = 0.96
+        elif q_stem and len(q_stem) >= 3 and q_stem in e_stem:
+            score = 0.86
+        else:
+            score = difflib.SequenceMatcher(None, q_stem or q_full, e_stem).ratio()
+        if score > best_score:
+            best_score = score
+            best_path = entry
+    if best_path is not None and best_score >= 0.72:
+        return best_path.resolve()
     return None
 
 
@@ -401,11 +484,12 @@ def _plan_impact_phrases(
     title: str,
     explicit_phrases: list[str],
     style: str,
+    use_stt: bool = True,
 ) -> list[dict[str, Any]]:
     palette = _STYLE_PALETTES.get(style, _STYLE_PALETTES["viral"])
     colors = palette["text_colors"]
     phrases: list[str] = [p.strip().upper() for p in explicit_phrases if p.strip()]
-    if not phrases:
+    if not phrases and use_stt:
         for clip in clips[:2]:
             phrases.extend(_transcribe_clip_phrases(ctx, clip))
             if len(phrases) >= 6:
@@ -452,6 +536,72 @@ def _extract_frame(clip: Path, at_s: float, dst: Path) -> bool:
         return dst.is_file()
     except Exception:
         return False
+
+
+def _grade_pil_image(img: Image.Image, color_grade: str) -> Image.Image:
+    out = img.convert("RGB")
+    if color_grade == "vivid":
+        out = ImageEnhance.Contrast(out).enhance(1.12)
+        out = ImageEnhance.Color(out).enhance(1.22)
+        out = ImageEnhance.Brightness(out).enhance(1.02)
+    elif color_grade == "teal_orange":
+        out = ImageEnhance.Contrast(out).enhance(1.14)
+        out = ImageEnhance.Color(out).enhance(1.15)
+        r, g, b = out.split()
+        r = r.point(lambda v: min(255, int(v * 1.05)))
+        b = b.point(lambda v: max(0, int(v * 0.94)))
+        out = Image.merge("RGB", (r, g, b))
+    elif color_grade == "cinematic_film":
+        out = ImageEnhance.Contrast(out).enhance(1.16)
+        out = ImageEnhance.Color(out).enhance(0.90)
+        out = ImageEnhance.Brightness(out).enhance(0.97)
+    return out
+
+
+def _render_composite_preview(
+    dst: Path,
+    bg_path: Path,
+    raw_frame: Path | None,
+    card_path: Path | None,
+    size: tuple[int, int],
+    *,
+    color_grade: str = "vivid",
+    show_progress_bar: bool = True,
+    progress_frac: float = 0.5,
+) -> None:
+    try:
+        pw, ph = 540, max(304, int(round(540 * (size[1] / max(1, size[0])))))
+        if bg_path.is_file():
+            canvas = Image.open(bg_path).convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
+        else:
+            canvas = Image.new("RGBA", (pw, ph), (16, 17, 24, 255))
+
+        if raw_frame is not None and raw_frame.is_file():
+            fg = _grade_pil_image(Image.open(raw_frame), color_grade)
+            fg_w, fg_h = int(pw * 0.90), int(ph * 0.90)
+            scale = min(fg_w / max(1, fg.width), fg_h / max(1, fg.height))
+            nw, nh = max(2, int(fg.width * scale)), max(2, int(fg.height * scale))
+            fg_rs = fg.resize((nw, nh), Image.Resampling.LANCZOS).convert("RGBA")
+            x = (pw - nw) // 2
+            y = (ph - nh) // 2
+            mask = Image.new("L", (nw, nh), 0)
+            ImageDraw.Draw(mask).rounded_rectangle([0, 0, nw, nh], radius=16, fill=255)
+            canvas.paste(fg_rs, (x, y), mask)
+
+        if card_path is not None and card_path.is_file():
+            card = Image.open(card_path).convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
+            canvas = Image.alpha_composite(canvas, card)
+
+        if show_progress_bar:
+            draw = ImageDraw.Draw(canvas)
+            bar_h = 6
+            draw.rectangle([0, ph - bar_h, pw, ph], fill=(30, 32, 42, 220))
+            fill_w = max(8, int(pw * max(0.05, min(1.0, progress_frac))))
+            draw.rectangle([0, ph - bar_h, fill_w, ph], fill=(157, 107, 255, 255))
+
+        canvas.convert("RGB").save(dst, "PNG")
+    except Exception:
+        log.debug("composite preview skipped", exc_info=True)
 
 
 def _generate_background_image(dst: Path, size: tuple[int, int], first_clip: ClipInfo, style: str, bg_mode: str) -> None:
@@ -537,24 +687,27 @@ def _render_phrase_card(dst: Path, phrase: dict[str, Any], size: tuple[int, int]
         b = draw.textbbox((0, 0), ln, font=font)
         line_widths.append(b[2] - b[0])
         line_heights.append(max(fsize, b[3] - b[1]))
-    pad_x, pad_y = int(w * 0.045), int(fsize * 0.35)
+    pad_x, pad_y = int(w * 0.048), int(fsize * 0.36)
     box_w = min(int(w * 0.92), max(line_widths) + pad_x * 2)
     box_h = sum(line_heights) + max(0, len(lines) - 1) * int(fsize * 0.25) + pad_y * 2
     box_x = (w - box_w) // 2
-    y_ratio = 0.22 if phrase.get("is_hook") else 0.72
+    y_ratio = 0.20 if phrase.get("is_hook") else 0.74
     box_y = max(40, min(h - box_h - 40, int(h * y_ratio) - box_h // 2))
 
     pill = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     pd = ImageDraw.Draw(pill)
     radius = max(18, int(fsize * 0.42))
-    pd.rounded_rectangle([box_x, box_y + 8, box_x + box_w, box_y + box_h + 8], radius=radius, fill=(0, 0, 0, 145))
-    pill = pill.filter(ImageFilter.GaussianBlur(radius=10))
+    pd.rounded_rectangle([box_x, box_y + 10, box_x + box_w, box_y + box_h + 10], radius=radius, fill=(0, 0, 0, 160))
+    pill = pill.filter(ImageFilter.GaussianBlur(radius=12))
     img = Image.alpha_composite(img, pill)
     draw = ImageDraw.Draw(img)
 
     fg_rgba = _hex_to_rgba(phrase["color"])
-    pill_rgba = _hex_to_rgba(phrase["pill"], 230)
-    draw.rounded_rectangle([box_x, box_y, box_x + box_w, box_y + box_h], radius=radius, fill=pill_rgba, outline=(*fg_rgba[:3], 170), width=3)
+    pill_rgba = _hex_to_rgba(phrase["pill"], 235)
+    draw.rounded_rectangle([box_x, box_y, box_x + box_w, box_y + box_h], radius=radius, fill=pill_rgba, outline=(*fg_rgba[:3], 185), width=3)
+    if phrase.get("is_hook"):
+        bar_w = max(8, w // 120)
+        draw.rounded_rectangle([box_x + 10, box_y + 12, box_x + 10 + bar_w, box_y + box_h - 12], radius=4, fill=fg_rgba)
 
     cur_y = box_y + pad_y
     for idx, ln in enumerate(lines):
@@ -625,6 +778,9 @@ def _build_capcut_draft(
     size: tuple[int, int],
     cut_interval_s: float,
     effects: list[str],
+    *,
+    color_grade: str = "vivid",
+    transition: str = "smooth",
 ) -> Path:
     draft_folder = drafts_root / project_name
     draft_folder.mkdir(parents=True, exist_ok=True)
@@ -644,6 +800,7 @@ def _build_capcut_draft(
         "audios": [],
         "texts": [],
         "effects": [],
+        "transitions": [],
         "canvases": [],
         "material_animations": [],
         "placeholder_infos": [],
@@ -654,6 +811,7 @@ def _build_capcut_draft(
         "loudnesses": [],
         "vocal_separations": [],
         "audio_fades": [],
+        "color_curves": [],
     }
     meta_videos: list[dict[str, Any]] = []
     meta_music: list[dict[str, Any]] = []
@@ -702,8 +860,33 @@ def _build_capcut_draft(
         })
         return mid
 
-    def _make_seg(mat_id: str, refs: list[str], src_start: int, src_dur: int, tgt_start: int, tgt_dur: int, *,
-                  scale: float = 1.0, tx: float = 0.0, ty: float = 0.0, volume: float = 1.0, render_idx: int = 0) -> dict[str, Any]:
+    def _scale_keyframes(start_scale: float, end_scale: float, dur_us: int) -> list[dict[str, Any]]:
+        if dur_us <= 400_000 or abs(end_scale - start_scale) < 0.005:
+            return []
+        kf_list = [
+            {"id": _cap_uid(), "time_offset": 0, "values": [round(start_scale, 3)], "curveType": "Line", "graphID": ""},
+            {"id": _cap_uid(), "time_offset": dur_us, "values": [round(end_scale, 3)], "curveType": "Line", "graphID": ""},
+        ]
+        return [
+            {"id": _cap_uid(), "property_type": "KFTypeScaleX", "material_id": "", "keyframe_list": kf_list},
+            {"id": _cap_uid(), "property_type": "KFTypeScaleY", "material_id": "", "keyframe_list": [dict(k, id=_cap_uid()) for k in kf_list]},
+        ]
+
+    def _make_seg(
+        mat_id: str,
+        refs: list[str],
+        src_start: int,
+        src_dur: int,
+        tgt_start: int,
+        tgt_dur: int,
+        *,
+        scale: float = 1.0,
+        tx: float = 0.0,
+        ty: float = 0.0,
+        volume: float = 1.0,
+        render_idx: int = 0,
+        keyframes: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": _cap_uid(),
             "material_id": mat_id,
@@ -718,7 +901,7 @@ def _build_capcut_draft(
             "visible": True,
             "render_index": render_idx,
             "extra_material_refs": refs,
-            "common_keyframes": [],
+            "common_keyframes": keyframes or [],
             "keyframe_refs": [],
             "uniform_scale": {"on": True, "value": scale},
             "clip": {
@@ -735,6 +918,7 @@ def _build_capcut_draft(
     cursor_us = 0
     beat_us = max(1_800_000, int(cut_interval_s * 1_000_000))
     use_zoom = "zoom_punch" in effects or "ken_burns" in effects or not effects
+    any_clip_audio = any(c.has_audio for c in clips)
 
     for c_idx, clip in enumerate(clips):
         clip_us = max(1_000_000, int(round(clip.duration_s * 1_000_000)))
@@ -746,13 +930,40 @@ def _build_capcut_draft(
             if clip_us - (pos + seg_dur) < 900_000:
                 seg_dur = clip_us - pos
             base_scale = 0.92
-            seg_scale = 1.02 if (use_zoom and (beat_idx + c_idx) % 2 == 1) else base_scale
+            alt_punch = (beat_idx + c_idx) % 2 == 1
+            seg_scale = 1.01 if (use_zoom and alt_punch) else base_scale
+            end_scale = 0.96 if (use_zoom and not alt_punch) else (1.06 if use_zoom else seg_scale)
             refs = _aux_refs()
             anim_id = _cap_uid()
             mats["material_animations"].append({"id": anim_id, "type": "sticker_animation", "animations": [], "multi_language_current": "none"})
             refs.append(anim_id)
+            if clip.has_audio:
+                fade_c = _cap_uid()
+                mats["audio_fades"].append({"id": fade_c, "type": "audio_fade", "fade_in_duration": 150_000, "fade_out_duration": 180_000})
+                refs.append(fade_c)
+            if transition != "cut" and main_segments:
+                tr_id = _cap_uid()
+                mats["transitions"].append({
+                    "id": tr_id,
+                    "type": "transition",
+                    "name": transition,
+                    "duration": 350_000,
+                    "is_overlap": True,
+                })
+                refs.append(tr_id)
+            kfs = _scale_keyframes(seg_scale, end_scale, seg_dur) if use_zoom else []
             main_segments.append(
-                _make_seg(mat_id, refs, pos, seg_dur, cursor_us, seg_dur, scale=seg_scale, render_idx=c_idx + 1)
+                _make_seg(
+                    mat_id,
+                    refs,
+                    pos,
+                    seg_dur,
+                    cursor_us,
+                    seg_dur,
+                    scale=seg_scale,
+                    render_idx=c_idx + 1,
+                    keyframes=kfs,
+                )
             )
             pos += seg_dur
             cursor_us += seg_dur
@@ -827,7 +1038,8 @@ def _build_capcut_draft(
         fade_id = _cap_uid()
         mats["audio_fades"].append({"id": fade_id, "type": "audio_fade", "fade_in_duration": 400_000, "fade_out_duration": 900_000})
         a_refs = _aux_refs()[:4] + [fade_id]
-        a_seg = _make_seg(a_mid, a_refs, 0, total_us, 0, total_us, volume=0.28, render_idx=0)
+        bgm_vol = 0.20 if any_clip_audio else 0.32
+        a_seg = _make_seg(a_mid, a_refs, 0, total_us, 0, total_us, volume=bgm_vol, render_idx=0)
         tracks.append({"id": _cap_uid(), "type": "audio", "segments": [a_seg], "flag": 0, "attribute": 0, "name": "", "is_default_name": True})
         meta_music.append({"create_time": now_s, "duration": total_us, "extra_info": music_path.name, "file_Path": music_path.as_posix(), "height": 0, "id": str(uuid.uuid4()), "import_time": now_s, "import_time_ms": now_us, "metetype": "music", "type": 0, "width": 0})
 
@@ -842,6 +1054,7 @@ def _build_capcut_draft(
         "fps": 30.0,
         "is_drop_frame_timecode": False,
         "color_space": 0,
+        "ressy_profile": {"color_grade": color_grade, "transition": transition},
         "canvas_config": {"ratio": "original", "width": w, "height": h, "background": None},
         "config": {"adjust_max_index": 1, "extract_audio_last_index": 1, "lyrics_sync": True, "maintrack_adsorb": True, "material_save_mode": 0},
         "tracks": tracks,
@@ -1037,7 +1250,34 @@ def _apply_davinci_project(
         return False
 
 
-def _render_ffmpeg_preview(
+_COLOR_GRADES: dict[str, str] = {
+    "vivid": "eq=contrast=1.10:brightness=0.02:saturation=1.22,unsharp=5:5:0.65:5:5:0.0",
+    "teal_orange": "colorbalance=rs=.06:gs=-.02:bs=-.07:rh=.05:gh=-.01:bh=-.06,eq=contrast=1.12:saturation=1.15,unsharp=5:5:0.60:5:5:0.0",
+    "cinematic_film": "eq=contrast=1.14:brightness=-0.02:saturation=0.92,colorbalance=rs=.03:bs=-.04,unsharp=3:3:0.45:3:3:0.0",
+    "neutral": "",
+}
+
+_TRANSITION_XFADE: dict[str, str | None] = {
+    "smooth": "fade",
+    "dissolve": "dissolve",
+    "zoom_whip": "slideleft",
+    "flash": "fadewhite",
+    "cut": None,
+}
+
+
+def _color_filter_expr(color_grade: str, effects: list[str]) -> str:
+    grade = _COLOR_GRADES.get(color_grade, "")
+    if not grade and ("color_pop" in effects or not effects):
+        grade = "eq=contrast=1.08:saturation=1.18"
+    parts = [grade] if grade else []
+    if "vignette" in effects:
+        parts.append("vignette=angle=0.35")
+    return ("," + ",".join(parts)) if parts else ""
+
+
+def _build_ffmpeg_cmd(
+    ffmpeg: str,
     out_mp4: Path,
     clips: list[ClipInfo],
     bg_path: Path,
@@ -1045,17 +1285,22 @@ def _render_ffmpeg_preview(
     music_path: Path | None,
     size: tuple[int, int],
     effects: list[str],
-) -> bool:
-    ffmpeg = find_ffmpeg()
-    if not ffmpeg:
-        return False
+    *,
+    color_grade: str = "vivid",
+    transition: str = "smooth",
+) -> list[str]:
     w, h = size
     total_s = sum(c.duration_s for c in clips)
-    cmd = [ffmpeg, "-y", "-loop", "1", "-t", f"{total_s:.2f}", "-i", str(bg_path)]
+    xf_name = _TRANSITION_XFADE.get(transition, "fade")
+    use_xfade = bool(xf_name and len(clips) > 1 and all(c.duration_s >= 1.2 for c in clips))
+    xf_dur = 0.35
+    eff_total_s = max(0.5, total_s - (xf_dur * (len(clips) - 1) if use_xfade else 0.0))
+
+    cmd = [ffmpeg, "-y", "-loop", "1", "-t", f"{eff_total_s:.2f}", "-i", str(bg_path)]
     for clip in clips:
         cmd += ["-i", str(clip.path)]
     for _ph, png in phrase_pngs:
-        cmd += ["-loop", "1", "-t", f"{total_s:.2f}", "-i", str(png)]
+        cmd += ["-loop", "1", "-t", f"{eff_total_s:.2f}", "-i", str(png)]
     bgm_idx = None
     if music_path and music_path.is_file():
         bgm_idx = 1 + len(clips) + len(phrase_pngs)
@@ -1065,19 +1310,29 @@ def _render_ffmpeg_preview(
     vid_labels: list[str] = []
     aud_labels: list[str] = []
     fg_w, fg_h = int(w * 0.92), int(h * 0.92)
-    eq = ",eq=contrast=1.08:saturation=1.18" if ("color_pop" in effects or not effects) else ""
-    vig = ",vignette=angle=0.35" if "vignette" in effects else ""
+    grade_fx = _color_filter_expr(color_grade, effects)
     for idx, clip in enumerate(clips):
         vi = f"[vclip{idx}]"
         filters.append(
             f"[{idx + 1}:v]scale={fg_w}:{fg_h}:force_original_aspect_ratio=decrease,"
-            f"pad={fg_w}:{fg_h}:(ow-iw)/2:(oh-ih)/2:color=black@0{eq}{vig},setsar=1{vi}"
+            f"pad={fg_w}:{fg_h}:(ow-iw)/2:(oh-ih)/2:color=black@0{grade_fx},"
+            f"fps=30,settb=AVTB,setsar=1{vi}"
         )
         vid_labels.append(vi)
         if clip.has_audio:
             aud_labels.append(f"[{idx + 1}:a]")
+
     if len(vid_labels) == 1:
         filters.append(f"{vid_labels[0]}null[fg]")
+    elif use_xfade and xf_name:
+        cur_v = vid_labels[0]
+        cum = clips[0].duration_s
+        for idx in range(1, len(vid_labels)):
+            nxt_v = "[fg]" if idx == len(vid_labels) - 1 else f"[vx{idx}]"
+            offset = max(0.1, cum - xf_dur * idx)
+            filters.append(f"{cur_v}{vid_labels[idx]}xfade=transition={xf_name}:duration={xf_dur:.2f}:offset={offset:.2f}{nxt_v}")
+            cur_v = nxt_v
+            cum += clips[idx].duration_s
     else:
         filters.append(f"{''.join(vid_labels)}concat=n={len(vid_labels)}:v=1:a=0[fg]")
 
@@ -1086,30 +1341,141 @@ def _render_ffmpeg_preview(
     base_txt_idx = 1 + len(clips)
     for idx, (ph, _png) in enumerate(phrase_pngs):
         nxt = f"[comp{idx + 1}]"
-        s_t = ph["start_s"]
-        e_t = ph["start_s"] + ph["duration_s"]
+        s_t = min(ph["start_s"], max(0.0, eff_total_s - 0.3))
+        e_t = min(eff_total_s, ph["start_s"] + ph["duration_s"])
         filters.append(f"{prev}[{base_txt_idx + idx}:v]overlay=0:0:enable='between(t,{s_t:.2f},{e_t:.2f})'{nxt}")
         prev = nxt
-    filters.append(f"{prev}format=yuv420p[vout]")
+    fade_out_st = max(0.0, eff_total_s - 0.35)
+    filters.append(f"{prev}fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out_st:.2f}:d=0.35,format=yuv420p[vout]")
 
     maps = ["-map", "[vout]"]
-    if bgm_idx is not None:
-        filters.append(f"[{bgm_idx}:a]volume=0.25,atrim=0:{total_s:.2f}[aout]")
-        maps += ["-map", "[aout]"]
-    elif aud_labels and len(aud_labels) == len(clips):
+    has_clip_aud = bool(aud_labels and len(aud_labels) == len(clips))
+    if has_clip_aud:
         if len(aud_labels) == 1:
-            filters.append(f"{aud_labels[0]}anull[aout]")
+            filters.append(f"{aud_labels[0]}anull[aclip]")
+        elif use_xfade:
+            cur_a = aud_labels[0]
+            for idx in range(1, len(aud_labels)):
+                nxt_a = "[aclip]" if idx == len(aud_labels) - 1 else f"[ax{idx}]"
+                filters.append(f"{cur_a}{aud_labels[idx]}acrossfade=d={xf_dur:.2f}{nxt_a}")
+                cur_a = nxt_a
         else:
-            filters.append(f"{''.join(aud_labels)}concat=n={len(aud_labels)}:v=0:a=1[aout]")
+            filters.append(f"{''.join(aud_labels)}concat=n={len(aud_labels)}:v=0:a=1[aclip]")
+
+    a_fade_out = max(0.0, eff_total_s - 0.6)
+    if bgm_idx is not None and has_clip_aud:
+        filters.append(f"[{bgm_idx}:a]atrim=0:{eff_total_s:.2f},volume=0.20,afade=t=in:st=0:d=0.35,afade=t=out:st={a_fade_out:.2f}:d=0.55[abgm]")
+        filters.append("[aclip][abgm]amix=inputs=2:duration=first:dropout_transition=2,afade=t=in:st=0:d=0.20[aout]")
+        maps += ["-map", "[aout]"]
+    elif bgm_idx is not None:
+        filters.append(f"[{bgm_idx}:a]atrim=0:{eff_total_s:.2f},volume=0.32,afade=t=in:st=0:d=0.35,afade=t=out:st={a_fade_out:.2f}:d=0.55[aout]")
+        maps += ["-map", "[aout]"]
+    elif has_clip_aud:
+        filters.append(f"[aclip]afade=t=in:st=0:d=0.20,afade=t=out:st={a_fade_out:.2f}:d=0.50[aout]")
         maps += ["-map", "[aout]"]
 
     cmd += ["-filter_complex", ";".join(filters), *maps, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-shortest", str(out_mp4)]
+    return cmd
+
+
+def _render_ffmpeg_preview(
+    out_mp4: Path,
+    clips: list[ClipInfo],
+    bg_path: Path,
+    phrase_pngs: list[tuple[dict[str, Any], Path]],
+    music_path: Path | None,
+    size: tuple[int, int],
+    effects: list[str],
+    *,
+    color_grade: str = "vivid",
+    transition: str = "smooth",
+) -> bool:
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return False
+    cmd = _build_ffmpeg_cmd(
+        ffmpeg,
+        out_mp4,
+        clips,
+        bg_path,
+        phrase_pngs,
+        music_path,
+        size,
+        effects,
+        color_grade=color_grade,
+        transition=transition,
+    )
     try:
         res = subprocess.run(cmd, capture_output=True, timeout=180, creationflags=CREATE_NO_WINDOW)
         return res.returncode == 0 and out_mp4.is_file()
     except Exception:
         log.debug("ffmpeg preview render failed", exc_info=True)
         return False
+
+
+def _studio_emit(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    ui = getattr(ctx.services, "ui", None)
+    if ui is None:
+        return
+    status_text = payload.get("status_text")
+    if status_text and hasattr(ui, "status"):
+        try:
+            ui.status(str(status_text))
+        except Exception:
+            pass
+    if hasattr(ui, "update_video_studio"):
+        try:
+            ui.update_video_studio(payload)
+        except Exception:
+            log.debug("video studio emit failed", exc_info=True)
+
+
+def _timeline_tracks_payload(
+    clips: list[ClipInfo],
+    phrases: list[dict[str, Any]],
+    *,
+    music_path: Path | None,
+    has_bg: bool,
+    has_fx: bool,
+) -> tuple[list[dict[str, Any]], list[float], float]:
+    v1_items: list[dict[str, Any]] = []
+    a1_items: list[dict[str, Any]] = []
+    transitions: list[float] = []
+    cursor = 0.0
+    for idx, clip in enumerate(clips):
+        end = cursor + clip.duration_s
+        v1_items.append({
+            "start": cursor,
+            "end": end,
+            "text": clip.path.stem[:20],
+            "keyframes": has_fx,
+        })
+        if clip.has_audio:
+            a1_items.append({"start": cursor, "end": end, "text": tr("Audio")})
+        if idx > 0:
+            transitions.append(cursor)
+        cursor = end
+    total_s = max(1.0, cursor)
+    if music_path and music_path.is_file():
+        a1_items.append({"start": 0.0, "end": total_s, "text": f"♪ {music_path.stem[:18]}", "color": "#2DD4BF"})
+
+    v3_items = [
+        {"start": ph["start_s"], "end": ph["start_s"] + ph["duration_s"], "text": ph["text"], "keyframes": has_fx}
+        for ph in phrases if ph.get("is_hook")
+    ]
+    v2_items = [
+        {"start": ph["start_s"], "end": ph["start_s"] + ph["duration_s"], "text": ph["text"]}
+        for ph in phrases if not ph.get("is_hook")
+    ]
+    bg_items = [{"start": 0.0, "end": total_s, "text": tr("Sfondo dinamico")}] if has_bg else []
+    tracks = [
+        {"id": "V3", "label": "V3 TITOLI", "items": v3_items},
+        {"id": "V2", "label": "V2 SUBS", "items": v2_items},
+        {"id": "V1", "label": "V1 VIDEO", "items": v1_items},
+        {"id": "BG", "label": "BG STUDIO", "items": bg_items},
+        {"id": "A1", "label": "A1 AUDIO", "items": a1_items},
+    ]
+    return tracks, transitions, total_s
 
 
 def _request_upload_from_ui(ctx: ToolContext, defaults: dict[str, Any]) -> dict[str, Any] | None:
@@ -1125,15 +1491,46 @@ def _request_upload_from_ui(ctx: ToolContext, defaults: dict[str, Any]) -> dict[
     return payload if isinstance(payload, dict) else None
 
 
+def _open_project_in_capcut(ctx: ToolContext, project_name: str) -> bool:
+    ui = getattr(ctx.services, "ui", None)
+    if ui is None or not hasattr(ui, "update_video_studio"):
+        return False
+    if sys.platform != "win32":
+        return False
+    try:
+        from ..vision import ocr
+        from . import winapi
+
+        win = ctx.services.apps.wait_until_ready("CapCut", timeout=9.0)
+        if win is None:
+            return False
+        winapi.focus_window(win.hwnd)
+        time.sleep(2.2)
+        screen = ocr.capture_and_ocr(win.hwnd)
+        match = None
+        for token in (project_name, project_name[:14], "Ressy_"):
+            match = ocr.find_text(screen, token)
+            if match is not None:
+                break
+        if match is not None:
+            winapi.click_at(match.cx, match.cy, double=True)
+            return True
+    except Exception:
+        log.debug("could not auto-enter CapCut draft card", exc_info=True)
+    return False
+
+
 def _open_editor_app(ctx: ToolContext, editor: str, draft_or_bundle: Path) -> bool:
     if editor == "capcut":
         exe = _find_capcut_exe()
         if exe is not None:
             platform_os.open_path(exe)
+            _open_project_in_capcut(ctx, draft_or_bundle.name)
             return True
         entry, _ = ctx.services.apps.find("CapCut")
         if entry is not None:
             launch(entry)
+            _open_project_in_capcut(ctx, draft_or_bundle.name)
             return True
         return False
     exe = _find_davinci_exe()
@@ -1158,7 +1555,11 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     phrases_raw = [str(p).strip() for p in (args.get("phrases") or []) if str(p).strip()]
     bg_mode = str(args.get("background") or "auto")
     effects = [str(e) for e in (args.get("effects") or ["zoom_punch", "color_pop", "vignette"])]
-    render_preview = bool(args.get("render_preview"))
+    transition = str(args.get("transition") or "smooth")
+    color_grade = str(args.get("color_grade") or ("teal_orange" if style == "cinematic" else "vivid"))
+    auto_captions = bool(args.get("auto_captions", True))
+    progress_bar = bool(args.get("progress_bar", True))
+    render_preview = bool(args.get("render_preview", True))
     music_arg = str(args.get("music") or "").strip()
     raw_files = [str(f).strip() for f in (args.get("files") or []) if str(f).strip()]
 
@@ -1169,8 +1570,12 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
                 "editor": editor,
                 "style": style,
                 "aspect_ratio": aspect_ratio,
+                "transition": transition,
+                "color_grade": color_grade,
                 "title": title,
                 "phrases": phrases_raw,
+                "auto_captions": auto_captions,
+                "progress_bar": progress_bar,
                 "render_preview": render_preview,
             },
         )
@@ -1185,10 +1590,17 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         style = str(uploaded.get("style") or style)
         aspect_ratio = str(uploaded.get("aspect_ratio") or aspect_ratio)
         size = _RATIOS.get(aspect_ratio, (1080, 1920))
+        transition = str(uploaded.get("transition") or transition)
+        color_grade = str(uploaded.get("color_grade") or color_grade)
         title = str(uploaded.get("title") or title)
         phrases_raw = list(uploaded.get("phrases") or phrases_raw)
         music_arg = str(uploaded.get("music") or music_arg)
-        render_preview = bool(uploaded.get("render_preview") or render_preview)
+        if "auto_captions" in uploaded:
+            auto_captions = bool(uploaded["auto_captions"])
+        if "progress_bar" in uploaded:
+            progress_bar = bool(uploaded["progress_bar"])
+        if "render_preview" in uploaded:
+            render_preview = bool(uploaded["render_preview"])
 
     resolved_videos: list[Path] = []
     missing: list[str] = []
@@ -1201,7 +1613,14 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         else:
             resolved_videos.append(found)
     if missing:
-        raise ToolError(tr("Non trovo questi file video: {files}. Controlla il nome o il percorso.").format(files=", ".join(missing)))
+        hint = _recent_media_hint()
+        hint_suffix = f" {hint}" if hint else ""
+        raise ToolError(
+            tr("Non trovo questi file video: {files}. Controlla il nome o il percorso.{hint}").format(
+                files=", ".join(missing),
+                hint=hint_suffix,
+            )
+        )
     if not resolved_videos:
         raise ToolError(tr("Carica almeno un file video per iniziare l'editing."))
 
@@ -1215,9 +1634,86 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     bundle_dir = videos_dir() / "Ressy Edits" / project_name
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
+    ed_label = "CapCut" if editor == "capcut" else "DaVinci Resolve"
+    done_stages: list[str] = []
+    _studio_emit(
+        ctx,
+        {
+            "type": "init",
+            "project_name": project_name,
+            "project_dir": str(bundle_dir),
+            "editor": ed_label,
+            "style": style,
+            "aspect_ratio": aspect_ratio,
+            "duration": max(2.0, total_s),
+            "stage": "analyze",
+            "progress": 6,
+            "message": tr("Studio avviato · analisi di {n} clip ({dur:.1f}s)…").format(n=len(clips), dur=total_s),
+            "status_text": tr("Analisi clip video…"),
+        },
+    )
+
+    raw_preview = bundle_dir / "preview_raw.jpg"
+    has_raw = _extract_frame(clips[0].path, min(1.0, clips[0].duration_s * 0.3), raw_preview)
+    tracks, transitions, dur_all = _timeline_tracks_payload(clips, [], music_path=music_path, has_bg=False, has_fx=False)
+    done_stages.append("analyze")
+    _studio_emit(
+        ctx,
+        {
+            "type": "stage",
+            "stage": "assets",
+            "done_stages": list(done_stages),
+            "progress": 20,
+            "duration": dur_all,
+            "playhead": 0.4,
+            "tracks": tracks,
+            "preview_path": str(raw_preview) if has_raw else "",
+            "preview_label": tr("Sorgente ({w}×{h})").format(w=clips[0].width, h=clips[0].height),
+            "message": tr("Creazione sfondo dinamico & preparazione color grading ({grade})…").format(grade=color_grade),
+            "status_text": tr("Creo sfondo & look…"),
+        },
+    )
+
     bg_path = bundle_dir / "background.png"
     _generate_background_image(bg_path, size, clips[0], style, bg_mode)
-    phrases = _plan_impact_phrases(ctx, clips, total_s, title=title, explicit_phrases=phrases_raw, style=style)
+    stage_grade = bundle_dir / "preview_graded.png"
+    _render_composite_preview(
+        stage_grade,
+        bg_path,
+        raw_preview if has_raw else None,
+        None,
+        size,
+        color_grade=color_grade,
+        show_progress_bar=False,
+        progress_frac=0.25,
+    )
+    tracks, transitions, dur_all = _timeline_tracks_payload(clips, [], music_path=music_path, has_bg=True, has_fx=False)
+    done_stages.append("assets")
+    _studio_emit(
+        ctx,
+        {
+            "type": "stage",
+            "stage": "captions",
+            "done_stages": list(done_stages),
+            "progress": 38,
+            "playhead": dur_all * 0.25,
+            "tracks": tracks,
+            "preview_path": str(stage_grade),
+            "preview_label": tr("Sfondo & color grading ({grade})").format(grade=color_grade),
+            "message": tr("Trascrizione audio & generazione titoli / sottotitoli sincronizzati…"),
+            "status_text": tr("Genero sottotitoli…"),
+        },
+    )
+
+    phrases = _plan_impact_phrases(
+        ctx,
+        clips,
+        total_s,
+        title=title,
+        explicit_phrases=phrases_raw,
+        style=style,
+        use_stt=auto_captions,
+    )
     phrase_pngs: list[tuple[dict[str, Any], Path]] = []
     for idx, ph in enumerate(phrases):
         p_img = bundle_dir / f"phrase_{idx + 1:02d}.png"
@@ -1226,20 +1722,124 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     srt_path = bundle_dir / "captions.srt"
     _write_srt(srt_path, phrases)
 
-    rendered_mp4: Path | None = None
-    if render_preview:
-        candidate_mp4 = bundle_dir / f"{project_name}_edited.mp4"
-        if _render_ffmpeg_preview(candidate_mp4, clips, bg_path, phrase_pngs, music_path, size, effects):
-            rendered_mp4 = candidate_mp4
+    stage_caps = bundle_dir / "preview_captions.png"
+    _render_composite_preview(
+        stage_caps,
+        bg_path,
+        raw_preview if has_raw else None,
+        phrase_pngs[0][1] if phrase_pngs else None,
+        size,
+        color_grade=color_grade,
+        show_progress_bar=progress_bar,
+        progress_frac=0.52,
+    )
+    tracks, transitions, dur_all = _timeline_tracks_payload(clips, phrases, music_path=music_path, has_bg=True, has_fx=False)
+    done_stages.append("captions")
+    _studio_emit(
+        ctx,
+        {
+            "type": "stage",
+            "stage": "effects",
+            "done_stages": list(done_stages),
+            "progress": 56,
+            "playhead": dur_all * 0.5,
+            "tracks": tracks,
+            "preview_path": str(stage_caps),
+            "preview_label": tr("Compositing titoli ({n} card)").format(n=len(phrase_pngs)),
+            "message": tr("Applico keyframe zoom, transizioni ({tr}) e auto-ducking audio…").format(tr=transition),
+            "status_text": tr("Applico transizioni & FX…"),
+        },
+    )
 
+    tracks, transitions, dur_all = _timeline_tracks_payload(clips, phrases, music_path=music_path, has_bg=True, has_fx=True)
+    done_stages.append("effects")
+    _studio_emit(
+        ctx,
+        {
+            "type": "stage",
+            "stage": "timeline",
+            "done_stages": list(done_stages),
+            "progress": 70,
+            "playhead": dur_all * 0.7,
+            "tracks": tracks,
+            "transitions": transitions,
+            "message": tr("Costruisco la timeline completa su {editor}…").format(editor=ed_label),
+            "status_text": tr("Esporto timeline {editor}…").format(editor=ed_label),
+        },
+    )
+
+    rendered_mp4: Path | None = None
     if editor == "capcut":
         drafts = capcut_drafts_dir()
         if drafts is None:
+            _studio_emit(ctx, {"type": "error", "stage": "timeline", "message": tr("CapCut non supportato su Linux.")})
             raise ToolError(tr("CapCut su Linux non ha un client desktop nativo: scegli DaVinci Resolve oppure attiva render_preview."))
         draft_dir = _build_capcut_draft(
-            drafts, project_name, clips, bg_path, phrases, music_path, size, palette["cut_s"], effects
+            drafts,
+            project_name,
+            clips,
+            bg_path,
+            phrases,
+            music_path,
+            size,
+            palette["cut_s"],
+            effects,
+            color_grade=color_grade,
+            transition=transition,
         )
+        done_stages.append("timeline")
+        _studio_emit(
+            ctx,
+            {
+                "type": "stage",
+                "stage": "render",
+                "done_stages": list(done_stages),
+                "progress": 84,
+                "playhead": dur_all * 0.88,
+                "message": tr("Esportazione MP4 finale & apertura automatica di CapCut…") if render_preview else tr("Apertura progetto in CapCut…"),
+                "status_text": tr("Render video finale…") if render_preview else tr("Apro CapCut…"),
+            },
+        )
+        if render_preview:
+            candidate_mp4 = bundle_dir / f"{project_name}_edited.mp4"
+            if _render_ffmpeg_preview(
+                candidate_mp4,
+                clips,
+                bg_path,
+                phrase_pngs,
+                music_path,
+                size,
+                effects,
+                color_grade=color_grade,
+                transition=transition,
+            ):
+                rendered_mp4 = candidate_mp4
+                final_frame = bundle_dir / "preview_final.jpg"
+                if _extract_frame(rendered_mp4, min(1.2, dur_all * 0.35), final_frame):
+                    _studio_emit(
+                        ctx,
+                        {
+                            "type": "preview",
+                            "progress": 95,
+                            "preview_path": str(final_frame),
+                            "preview_label": tr("Render finale MP4"),
+                        },
+                    )
         opened = _open_editor_app(ctx, "capcut", draft_dir)
+        done_stages.append("render")
+        _studio_emit(
+            ctx,
+            {
+                "type": "done",
+                "done_stages": list(done_stages),
+                "progress": 100,
+                "playhead": dur_all,
+                "output_mp4": str(rendered_mp4) if rendered_mp4 else "",
+                "project_dir": str(draft_dir if not rendered_mp4 else bundle_dir),
+                "message": tr("Editing completato su CapCut!"),
+                "status_text": tr("Video pronto!"),
+            },
+        )
         preview_note = tr(" Anteprima esportata: {path}.").format(path=rendered_mp4.name) if rendered_mp4 else ""
         if opened:
             return tr(
@@ -1253,12 +1853,64 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     media_all = [bg_path, *[c.path for c in clips], *[p for _, p in phrase_pngs]]
     if music_path:
         media_all.append(music_path)
+    done_stages.append("timeline")
+    _studio_emit(
+        ctx,
+        {
+            "type": "stage",
+            "stage": "render",
+            "done_stages": list(done_stages),
+            "progress": 84,
+            "playhead": dur_all * 0.88,
+            "message": tr("Invio timeline a DaVinci Resolve & render anteprima…"),
+            "status_text": tr("Apro DaVinci Resolve…"),
+        },
+    )
+    if render_preview:
+        candidate_mp4 = bundle_dir / f"{project_name}_edited.mp4"
+        if _render_ffmpeg_preview(
+            candidate_mp4,
+            clips,
+            bg_path,
+            phrase_pngs,
+            music_path,
+            size,
+            effects,
+            color_grade=color_grade,
+            transition=transition,
+        ):
+            rendered_mp4 = candidate_mp4
+            final_frame = bundle_dir / "preview_final.jpg"
+            if _extract_frame(rendered_mp4, min(1.2, dur_all * 0.35), final_frame):
+                _studio_emit(
+                    ctx,
+                    {
+                        "type": "preview",
+                        "progress": 95,
+                        "preview_path": str(final_frame),
+                        "preview_label": tr("Render finale MP4"),
+                    },
+                )
     resolve = _connect_davinci_resolve(launch_if_closed=True)
     connected = False
     if resolve is not None:
         connected = _apply_davinci_project(resolve, project_name, fcpxml_path, media_all, srt_path)
     if not connected:
         _open_editor_app(ctx, "davinci", bundle_dir)
+    done_stages.append("render")
+    _studio_emit(
+        ctx,
+        {
+            "type": "done",
+            "done_stages": list(done_stages),
+            "progress": 100,
+            "playhead": dur_all,
+            "output_mp4": str(rendered_mp4) if rendered_mp4 else "",
+            "project_dir": str(bundle_dir),
+            "message": tr("Editing completato!"),
+            "status_text": tr("Video pronto!"),
+        },
+    )
     preview_note = tr(" Anteprima MP4 esportata: {path}.").format(path=rendered_mp4.name) if rendered_mp4 else ""
     if connected:
         return tr(
@@ -1277,19 +1929,24 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "edit_video",
-        "Edita video aprendo CapCut o DaVinci Resolve: chiede di caricare i video, poi aggiunge sfondo, effetti, transizioni e testi ad impatto.",
+        "Edita video live con Studio su CapCut o DaVinci (sfondi, grading, transizioni, keyframe, testi, MP4). "
+        "Vuoto apre upload: mai inventare file.",
         params(
             {
-                "editor": {"type": "string", "enum": ["auto", "capcut", "davinci"], "description": "capcut, davinci o auto"},
-                "files": {"type": "array", "items": {"type": "string"}, "description": "file video da editare; se vuoto chiede di caricarli"},
+                "editor": {"type": "string", "enum": ["auto", "capcut", "davinci"]},
+                "files": {"type": "array", "items": {"type": "string"}, "description": "percorsi/nomi reali; vuoto per upload"},
                 "style": {"type": "string", "enum": ["viral", "cinematic", "gaming", "vlog", "minimal"]},
                 "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"]},
-                "title": {"type": "string", "description": "titolo o hook iniziale"},
-                "phrases": {"type": "array", "items": {"type": "string"}, "description": "frasi o testi ad impatto da inserire"},
+                "transition": {"type": "string", "enum": ["smooth", "dissolve", "zoom_whip", "flash", "cut"]},
+                "color_grade": {"type": "string", "enum": ["vivid", "teal_orange", "cinematic_film", "neutral"]},
+                "title": {"type": "string"},
+                "phrases": {"type": "array", "items": {"type": "string"}},
                 "background": {"type": "string", "enum": ["auto", "blur", "neon_grid", "dark_gradient", "none"]},
-                "effects": {"type": "array", "items": {"type": "string"}, "description": "effetti: zoom_punch, ken_burns, vignette, color_pop"},
-                "music": {"type": "string", "description": "musica di sottofondo opzionale"},
-                "render_preview": {"type": "boolean", "description": "esporta anche MP4 finale"},
+                "effects": {"type": "array", "items": {"type": "string"}},
+                "music": {"type": "string"},
+                "auto_captions": {"type": "boolean"},
+                "progress_bar": {"type": "boolean"},
+                "render_preview": {"type": "boolean"},
                 "project_name": {"type": "string"},
             },
         ),

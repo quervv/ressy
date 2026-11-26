@@ -23,7 +23,7 @@ from typing import Any, Callable
 import httpx
 
 from ..config import LOCAL_LLM_MODELS
-from ..i18n import N_, language, tr
+from ..i18n import language, tr
 from .groq import ChatResult, GroqError
 
 log = logging.getLogger("ressy.llm.local")
@@ -104,7 +104,7 @@ LOCAL_TOOLS_FULL = LOCAL_TOOLS + (
     "read_screen", "click_text", "window_action", "mouse_action", "clipboard",
     "notes", "timer", "system_control", "read_webpage", "compose_email", "run_powershell",
 )
-_MAX_HISTORY = 6
+_MAX_HISTORY = 2
 _LOCAL_CONTINUE_LOOKING = frozenset({
     "list_windows", "read_screen", "list_folder", "read_file", "find_files", "read_webpage", "read_discord_chat", "clipboard",
 })
@@ -128,7 +128,8 @@ _LOCAL_SECONDARY = re.compile(
 _MULTI_ARG_TOOLS = frozenset({
     "run_python", "run_powershell", "create_file", "read_file", "file_action",
     "download_file", "write_in_app", "type_text", "press_keys", "mouse_action",
-    "click_text", "open_url", "web_search", "web_answer",
+    "click_text", "open_url", "web_search", "web_answer", "open_app", "open_folder",
+    "find_files", "edit_video", "send_discord_message",
 })
 
 Progress = Callable[[int, int], None]
@@ -287,10 +288,16 @@ _EXAMPLES = (
         "argomenti": {"recipient": "Marco", "message": "ciao", "kind": "user"},
         "risposta": "",
     }),
+    ("edita un video", {"azione": "edit_video", "argomenti": {"editor": "auto"}, "risposta": ""}),
     ("metti lofi su youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
     ("crea il file lista.txt con pane e latte", {
         "azione": "create_file",
         "argomenti": {"name": "lista.txt", "content": "pane e latte"},
+        "risposta": "",
+    }),
+    ("calcola i primi 10 quadrati in python", {
+        "azione": "run_python",
+        "argomenti": {"code": "print([i*i for i in range(1, 11)])"},
         "risposta": "",
     }),
     ("che tempo fa a Torino?", {"azione": "weather", "argomenti": {"city": "Torino"}, "risposta": ""}),
@@ -303,6 +310,7 @@ _EXAMPLES_EN = (
         "argomenti": {"recipient": "Marco", "message": "hi", "kind": "user"},
         "risposta": "",
     }),
+    ("edit a video", {"azione": "edit_video", "argomenti": {"editor": "auto"}, "risposta": ""}),
     ("play lofi on youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
     ("what's the weather in London?", {"azione": "weather", "argomenti": {"city": "London"}, "risposta": ""}),
     ("how are you?", {"azione": "rispondi", "argomenti": {}, "risposta": "Very well, thanks! What can I do for you?"}),
@@ -310,7 +318,7 @@ _EXAMPLES_EN = (
 
 
 def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | None = None) -> str:
-    limit = 65 if len(tools) > 25 else 90
+    limit = 55 if len(tools) > 25 else 90
     lines = "\n".join(_tool_line(t, limit) for t in tools)
     names = {(t.get("function") or {}).get("name") for t in tools}
     if (lang or language()) == "en":
@@ -320,9 +328,10 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
             for said, answer in _EXAMPLES_EN if answer["azione"] in names or answer["azione"] == "rispondi"
         )
         return (
-            f"You are Ressy, the voice assistant on {whose} PC. Follow EVERY user request faithfully from start to finish.\n"
-            "Use the tools below to do literally anything requested (apps, files, web, download_file, run_python, run_powershell, UI, video), "
-            "or choose \"rispondi\" to talk. Never refuse achievable tasks or claim you did something without calling a tool.\n\n"
+            f"You are Ressy, the voice assistant on {whose} PC. Answer ONLY the current user request.\n"
+            "Use the tools below to accomplish ANYTHING requested (apps, find_files, web_answer, download_file, "
+            "run_python, run_powershell, UI, edit_video), or choose \"rispondi\" only for chatting/questions. "
+            "Never say «I can't» and never invent file paths (for edit_video without user files, omit files).\n\n"
             f"Tools:\n{lines}\n\nExamples:\n{examples}"
         )
     who = f" di {user_name}" if user_name else ""
@@ -331,9 +340,10 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
         for said, answer in _EXAMPLES if answer["azione"] in names or answer["azione"] == "rispondi"
     )
     return (
-        f"Sei Ressy, l'assistente personale sul PC{who}. Segui alla lettera TUTTO ciò che chiede l'utente.\n"
-        "Usa gli strumenti qui sotto per fare qualsiasi cosa richiesta (app, file, web, download_file, run_python, run_powershell, UI, video), "
-        "oppure scegli \"rispondi\" per rispondere. Non dire mai «non posso» se puoi risolverlo con gli strumenti o con Python/shell.\n\n"
+        f"Sei Ressy, l'assistente personale sul PC{who}. Rispondi SOLO all'ultima richiesta attuale dell'utente.\n"
+        "Usa gli strumenti qui sotto per fare QUALSIASI cosa richiesta (app, find_files, web_answer, download_file, "
+        "run_python, run_powershell, UI, edit_video), oppure scegli \"rispondi\" solo per parlare. "
+        "Non dire mai «non posso» e non inventare nomi di file (per edit_video senza file reali non mettere files).\n\n"
         f"Strumenti:\n{lines}\n\nEsempi:\n{examples}"
     )
 
@@ -360,11 +370,25 @@ def answer_schema(names: list[str], tools: list[dict[str, Any]] | None = None) -
 
 
 def to_local_messages(messages: list[dict[str, Any]], system: str) -> list[dict[str, str]]:
+    non_system = [m for m in messages if m.get("role") != "system"]
+    last_user_idx = max((i for i, m in enumerate(non_system) if m.get("role") == "user"), default=0)
+
+    context_note = ""
+    if last_user_idx >= 2:
+        prev_u = ""
+        prev_a = ""
+        for m in reversed(non_system[:last_user_idx]):
+            if not prev_a and m.get("role") == "assistant" and not m.get("tool_calls"):
+                prev_a = str(m.get("content") or "").strip()[:180]
+            elif prev_a and m.get("role") == "user":
+                prev_u = str(m.get("content") or "").strip()[:120]
+                break
+        if prev_u and prev_a:
+            context_note = f"[Contesto precedente (solo se la nuova richiesta vi si riferisce): «{prev_u}» → «{prev_a}»]\n"
+
     out: list[dict[str, str]] = []
-    for message in messages:
+    for offset, message in enumerate(non_system[last_user_idx:]):
         role = message.get("role")
-        if role == "system":
-            continue
         if role == "assistant":
             calls = message.get("tool_calls") or []
             if calls:
@@ -381,17 +405,16 @@ def to_local_messages(messages: list[dict[str, Any]], system: str) -> list[dict[
         elif role == "tool":
             out.append({"role": "user", "content": f"{tr('Risultato di ')}{message.get('name')}: {message.get('content')}"})
         else:
-            out.append({"role": "user", "content": str(message.get("content") or "")})
-    last_user = max((i for i, m in enumerate(out) if m["role"] == "user" and not m["content"].startswith(tr("Risultato di "))),
-                    default=0)
-    start = max(0, last_user - _MAX_HISTORY)
-    return [{"role": "system", "content": system}, *out[start:]]
+            content = str(message.get("content") or "")
+            if offset == 0 and context_note:
+                content = context_note + content
+            out.append({"role": "user", "content": content})
+    return [{"role": "system", "content": system}, *out]
 
 
 _CLAIMS_DONE = re.compile(r"^\s*(fatto|ho (?:aperto|avviato|scritto|mandato|inviato|messo|chiuso|cercato|impostato)"
                           r"|done|i(?:'ve| have)? (?:opened|started|written|wrote|sent|put|closed|searched|set))\b",
                           re.I)
-_CANT_DO = N_("Questo con l'AI sul PC non riesco a farlo. Con una chiave online (Groq o Gemini, gratis) sì.")
 
 
 def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
@@ -405,8 +428,6 @@ def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
     args = data.get("argomenti") if isinstance(data.get("argomenti"), dict) else {}
     reply = str(data.get("risposta") or "").strip()
     if action == "rispondi" or action not in allowed:
-        if allowed and _CLAIMS_DONE.match(reply):
-            reply = tr(_CANT_DO)
         return {"role": "assistant", "content": reply}
     return {
         "role": "assistant",
@@ -455,6 +476,9 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
         if message.get("role") == "tool":
             tool_count_in_turn += 1
 
+    if not all_ok and tool_count_in_turn < 3:
+        return None
+
     if all_ok and tool_names:
         if all(n in _LOCAL_CONTINUE_LOOKING for n in tool_names):
             return None
@@ -489,12 +513,14 @@ def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> di
     cur_name = cur_call.get("name")
     if prev_call.get("name") != cur_name:
         return message
-    if cur_name in _MULTI_ARG_TOOLS and _norm_call_args(prev_call) != _norm_call_args(cur_call):
-        return message
     try:
         result = json.loads(messages[-1].get("content") or "{}")
     except ValueError:
         result = {}
+    prev_ok = bool(result.get("ok"))
+    same_args = _norm_call_args(prev_call) == _norm_call_args(cur_call)
+    if not same_args and (not prev_ok or cur_name in _MULTI_ARG_TOOLS):
+        return message
     return {"role": "assistant", "content": str(result.get("esito") or result.get("errore") or "Fatto.")}
 
 

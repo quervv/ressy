@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..speech.textnorm import normalize, similarity
+from ..speech.wake import phonetic
 from . import platform_os, winapi
 from .registry import Tool, ToolContext, ToolError, params
 from ..i18n import tr
@@ -24,6 +26,7 @@ MAX_AGE_S = 6 * 3600
 ALIASES: dict[str, list[str]] = {
     "chrome": ["Google Chrome"],
     "cromo": ["Google Chrome"],
+    "crome": ["Google Chrome"],
     "google": ["Google Chrome"],
     "edge": ["Microsoft Edge"],
     "firefox": ["Firefox", "Mozilla Firefox"],
@@ -53,6 +56,7 @@ ALIASES: dict[str, list[str]] = {
     "terminal": ["Terminale", "Terminal", "Windows Terminal"],
     "prompt dei comandi": ["Prompt dei comandi", "Command Prompt"],
     "telegram": ["Telegram Desktop", "Telegram"],
+    "telegramma": ["Telegram Desktop", "Telegram"],
     "whatsapp": ["WhatsApp"],
     "uozzap": ["WhatsApp"],
     "wazzap": ["WhatsApp"],
@@ -69,6 +73,18 @@ ALIASES: dict[str, list[str]] = {
     "spotify": ["Spotify"],
     "spotifai": ["Spotify"],
     "spotifi": ["Spotify"],
+    "fortnite": ["Fortnite"],
+    "fortreta": ["Fortnite"],
+    "fortnait": ["Fortnite"],
+    "fortinite": ["Fortnite"],
+    "minecraft": ["Minecraft Launcher", "Minecraft"],
+    "maicraft": ["Minecraft Launcher", "Minecraft"],
+    "maincraft": ["Minecraft Launcher", "Minecraft"],
+    "roblox": ["Roblox Player", "Roblox"],
+    "roblocs": ["Roblox Player", "Roblox"],
+    "roblocks": ["Roblox Player", "Roblox"],
+    "valorent": ["Valorant"],
+    "stim": ["Steam"],
     "obs": ["OBS Studio"],
     "store": ["Microsoft Store"],
     "foto": ["Foto", "Photos"],
@@ -164,6 +180,16 @@ def _score(query: str, entry_norm: str) -> float:
         return 1.0
     q_tokens, e_tokens = query.split(), entry_norm.split()
     score = similarity(query, entry_norm)
+    q_compact, e_compact = query.replace(" ", ""), entry_norm.replace(" ", "")
+    if min(len(q_compact), len(e_compact)) / max(len(q_compact), len(e_compact)) >= 0.68:
+        q_sp = q_compact.replace("k", "c").replace("y", "i").replace("ph", "f").replace("w", "v")
+        e_sp = e_compact.replace("k", "c").replace("y", "i").replace("ph", "f").replace("w", "v")
+        score = max(score, similarity(q_sp, e_sp) * 0.95)
+        p_sim = similarity(phonetic(q_compact), phonetic(e_compact))
+        if p_sim >= 0.77:
+            score = max(score, p_sim * 0.94)
+        if len(q_compact) >= 5 and len(e_compact) >= 5 and q_compact[:4] == e_compact[:4] and score >= 0.58:
+            score = max(score, 0.74)
     if entry_norm.startswith(query + " "):
         score = max(score, 0.93 - 0.01 * (len(e_tokens) - len(q_tokens)))
     if all(t in e_tokens for t in q_tokens):
@@ -576,6 +602,23 @@ def open_app(ctx: ToolContext, args: dict) -> str:
         if _bring_up(name, before, READY_AGAIN_S if before else 8.0):
             return tr("Ho aperto {name}: è pronto.").format(name=name)
         return tr("Ho avviato {name}.").format(name=name)
+    exe = shutil.which(name) or (shutil.which(f"{name}.exe") if sys.platform == "win32" else None)
+    if exe:
+        if sys.platform == "win32":
+            os.startfile(exe)
+        else:
+            platform_os.launch_unix_target(exe)
+        return tr("Ho avviato {name}.").format(name=name)
+    from . import web
+
+    norm_name = name.lower().strip()
+    if norm_name in web.SITES or (" " not in norm_name and "." in norm_name):
+        try:
+            url = web.normalize_url(name)
+            web._open(url)
+            return tr("Ho aperto {value} nel browser.").format(value=name)
+        except ToolError:
+            pass
     if alternatives:
         names = ", ".join(a.name for a in alternatives[:4])
         raise ToolError(tr("Non ho trovato '{name}' con certezza. Forse intendevi: {names}?").format(name=name, names=names))
@@ -793,25 +836,22 @@ def window_action(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "open_app",
-        "Avvia un programma o un'app installata (es. Spotify, Discord, Calcolatrice, Word).",
-        params({"name": {"type": "string", "description": "nome del programma"}}, ["name"]),
+        "Avvia un programma o un'app installata (Spotify, Discord, Word...).",
+        params({"name": {"type": "string"}}, ["name"]),
         open_app,
         timeout=40,
         uses_screen=True,
     ),
     Tool(
         "close_app",
-        "Chiude un programma aperto. force=true lo termina anche se resta in background o non risponde.",
-        params(
-            {"name": {"type": "string"}, "force": {"type": "boolean", "description": "chiusura forzata"}},
-            ["name"],
-        ),
+        "Chiude un programma (force=true lo termina forzatamente).",
+        params({"name": {"type": "string"}, "force": {"type": "boolean"}}, ["name"]),
         close_app,
     ),
-    Tool("list_windows", "Elenca le finestre aperte sul PC.", params(), list_windows),
+    Tool("list_windows", "Elenca finestre aperte.", params(), list_windows),
     Tool(
         "focus_app",
-        "Porta in primo piano la finestra di un programma già aperto.",
+        "Porta in primo piano un'app aperta.",
         params({"name": {"type": "string"}}, ["name"]),
         focus_app,
         snapshot_on_error=True,
@@ -819,8 +859,7 @@ TOOLS = [
     ),
     Tool(
         "window_action",
-        "Gestisce le finestre per il multitasking: minimize, maximize, restore, snap_left, snap_right, "
-        "minimize_all, always_on_top, fullscreen, switch_next.",
+        "Gestisce finestre: minimize, maximize, restore, snap_left, snap_right, minimize_all, always_on_top, fullscreen, switch_next.",
         params(
             {
                 "action": {
@@ -830,7 +869,7 @@ TOOLS = [
                         "minimize_all", "always_on_top", "fullscreen", "switch_next",
                     ],
                 },
-                "app": {"type": "string", "description": "nome app (opzionale: default finestra attiva)"},
+                "app": {"type": "string"},
             },
             ["action"],
         ),

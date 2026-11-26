@@ -169,6 +169,18 @@ def main(argv: list[str] | None = None) -> int:
 
     bridge.videoUploadRequested.connect(open_video_upload)
 
+    def on_video_studio(payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        from .ui.video_studio import VideoStudioWindow
+
+        studio = windows.get("video_studio")
+        if studio is None:
+            studio = windows["video_studio"] = VideoStudioWindow()
+        studio.apply_event(payload)
+
+    bridge.videoStudioUpdated.connect(on_video_studio)
+
     from .ui.update_dialog import UpdateChecker, UpdateDialog
 
     update_dialog = UpdateDialog(quit_app=app.quit)
