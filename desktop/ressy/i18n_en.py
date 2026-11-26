@@ -1845,4 +1845,36 @@ EN: dict[str, str] = {
         'Video and audio (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.mp3 *.wav);;All files (*)',
     'Carica almeno un video prima di iniziare.':
         'Upload at least one video before starting.',
+    '(eseguito senza output)':
+        '(ran with no output)',
+    'Codice Python troppo lungo.':
+        'Python code is too long.',
+    'Download non riuscito: {err}':
+        'Download failed: {err}',
+    'Equilibrio ideale su PC, capisce più comandi':
+        'Balanced for a PC, understands more commands',
+    'Eseguo uno script Python…':
+        'Running a Python script…',
+    'File troppo grande (massimo 500 MB).':
+        'File is too large (500 MB max).',
+    'Fino a 2 GB: massima intelligenza offline per fare tutto':
+        'Up to 2 GB: maximum offline intelligence to handle everything',
+    'Ho scaricato {name} ({size:.1f} MB) in {folder}.':
+        'Downloaded {name} ({size:.1f} MB) to {folder}.',
+    'Il comando ha impiegato più di 120 secondi ed è stato interrotto.':
+        'The command took more than 120 seconds and was stopped.',
+    'Lo script Python ha superato il limite di tempo ({s}s).':
+        'The Python script exceeded the time limit ({s}s).',
+    'Lo script Python è fallito (codice {returncode}): {value}':
+        'The Python script failed (exit code {returncode}): {value}',
+    'Manca il codice Python da eseguire.':
+        'Missing Python code to run.',
+    'Massima':
+        'Maximum',
+    'Non modifico le cartelle di sistema del sistema operativo.':
+        'I do not modify operating system folders.',
+    'Questo script può danneggiare il sistema: non lo eseguo.':
+        'This script could harm the system: I will not run it.',
+    'Scarico il file…':
+        'Downloading file…',
 }

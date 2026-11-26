@@ -23,8 +23,8 @@ from ..i18n import N_, language, tr
 log = logging.getLogger("ressy.more")
 
 CREATE_NO_WINDOW = 0x08000000
-MAX_FILE_CHARS = 200_000
-READ_LIMIT = 6000
+MAX_FILE_CHARS = 500_000
+READ_LIMIT = 12_000
 
 FOLDERS = {
     "desktop": "desktop", "scrivania": "desktop",
@@ -66,15 +66,20 @@ def resolve_path(name: str, folder: str = "") -> Path:
     else:
         base = Path(winapi.known_folder("desktop") or _home() / "Desktop") if sys.platform == "win32" else user_folder("desktop")
     path = Path(name)
+    was_absolute = path.is_absolute() or (folder.strip() and Path(os.path.expandvars(os.path.expanduser(folder.strip().strip('"')))).is_absolute())
     if not path.is_absolute():
         path = base / path
     path = path.resolve()
     if any(_BAD_NAME.search(part) for part in path.parts[1:]):
         raise ToolError(tr("Il nome del file contiene caratteri non ammessi."))
     home = _home()
-    if path != home and home not in path.parents:
+    low_parts = [p.lower() for p in path.parts]
+    sys_dirs = {"windows", "program files", "program files (x86)", "programdata", "system32", "syswow64", "usr", "bin", "sbin", "etc", "var", "boot", "system"}
+    if any(part in sys_dirs for part in low_parts[1:3]) or (len(path.parts) <= 1):
+        raise ToolError(tr("Non modifico le cartelle di sistema del sistema operativo."))
+    if not was_absolute and path != home and home not in path.parents:
         raise ToolError(tr("Per sicurezza creo e leggo file solo dentro la tua cartella utente."))
-    if any(part.lower() in ("appdata",) for part in path.relative_to(home).parts[:1]):
+    if home in path.parents and any(part.lower() in ("appdata",) for part in path.relative_to(home).parts[:1]):
         raise ToolError(tr("Non tocco i file di sistema delle app (AppData)."))
     return path
 
@@ -649,16 +654,16 @@ def run_powershell(ctx: ToolContext, args: dict) -> str:
     command = args["command"].strip()
     if not command:
         raise ToolError(tr("Comando vuoto."))
-    if len(command) > 4000:
+    if len(command) > 16_000:
         raise ToolError(tr("Comando troppo lungo."))
     if sys.platform != "win32":
         log.info("unix shell: %d characters", len(command))
         try:
-            rc, out, err = platform_os.run_unix_shell(command, _home(), timeout=60)
+            rc, out, err = platform_os.run_unix_shell(command, _home(), timeout=120)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
         except subprocess.TimeoutExpired as exc:
-            raise ToolError(tr("Il comando ha impiegato più di 60 secondi ed è stato interrotto.")) from exc
+            raise ToolError(tr("Il comando ha impiegato più di 120 secondi ed è stato interrotto.")) from exc
         text = out[:READ_LIMIT] or tr("(nessun output)")
         if rc != 0:
             raise ToolError(tr("Il comando è fallito (codice {returncode}): {value}").format(returncode=rc, value=(err or out)[:1500]))
@@ -671,18 +676,102 @@ def run_powershell(ctx: ToolContext, args: dict) -> str:
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
              "[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + command],
             capture_output=True,
-            timeout=60,
+            timeout=120,
             creationflags=CREATE_NO_WINDOW,
             cwd=str(_home()),
         )
     except subprocess.TimeoutExpired as exc:
-        raise ToolError(tr("Il comando ha impiegato più di 60 secondi ed è stato interrotto.")) from exc
+        raise ToolError(tr("Il comando ha impiegato più di 120 secondi ed è stato interrotto.")) from exc
     out = result.stdout.decode("utf-8", errors="replace").strip()
     err = result.stderr.decode("utf-8", errors="replace").strip()
     text = out[:READ_LIMIT] or tr("(nessun output)")
     if result.returncode != 0:
         raise ToolError(tr("Il comando è fallito (codice {returncode}): {value}").format(returncode=result.returncode, value=(err or out)[:1500]))
     return text + (tr("\n[avvisi: {value}]").format(value=err[:500]) if err else "")
+
+
+_PY_DANGEROUS = re.compile(
+    r"(shutil\.rmtree\s*\(\s*['\"](?:[a-zA-Z]:\\\\|/)['\"]|os\.system\s*\(\s*['\"](?:format|diskpart|rm\s+-rf\s+/))",
+    re.IGNORECASE,
+)
+
+
+def run_python(ctx: ToolContext, args: dict) -> str:
+    import tempfile
+
+    code = (args.get("code") or "").rstrip()
+    if not code:
+        raise ToolError(tr("Manca il codice Python da eseguire."))
+    if len(code) > 25_000:
+        raise ToolError(tr("Codice Python troppo lungo."))
+    if _PY_DANGEROUS.search(code):
+        raise ToolError(tr("Questo script può danneggiare il sistema: non lo eseguo."))
+    timeout = max(5, min(180, int(args.get("timeout") or 120)))
+    cwd = _home()
+    if args.get("workdir"):
+        cand = Path(os.path.expandvars(os.path.expanduser(str(args["workdir"])))).resolve()
+        if cand.is_dir():
+            cwd = cand
+    fd, tmp_name = tempfile.mkstemp(prefix="ressy-py-", suffix=".py")
+    os.close(fd)
+    script = Path(tmp_name)
+    try:
+        script.write_text(code, encoding="utf-8")
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+            cwd=str(cwd),
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ToolError(tr("Lo script Python ha superato il limite di tempo ({s}s).").format(s=timeout)) from exc
+    finally:
+        script.unlink(missing_ok=True)
+    out = result.stdout.decode("utf-8", errors="replace").strip()
+    err = result.stderr.decode("utf-8", errors="replace").strip()
+    if result.returncode != 0:
+        raise ToolError(tr("Lo script Python è fallito (codice {returncode}): {value}").format(returncode=result.returncode, value=(err or out)[:1500]))
+    return (out[:READ_LIMIT] or tr("(eseguito senza output)")) + (tr("\n[avvisi: {value}]").format(value=err[:500]) if err else "")
+
+
+def download_file(ctx: ToolContext, args: dict) -> str:
+    from .web import _check_public_host, normalize_url
+
+    url = normalize_url(args.get("url") or "")
+    _check_public_host(url)
+    name = (args.get("filename") or "").strip()
+    if not name:
+        tail = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        name = tail if tail and "." in tail else "download.bin"
+    folder = (args.get("folder") or "download").strip()
+    dst = resolve_path(name, folder)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(dst.suffix + ".part")
+    max_bytes = 500 * 1024 * 1024
+    written = 0
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(60.0, connect=15.0),
+                          headers={"User-Agent": "Ressy/1.3"}) as r:
+            _check_public_host(str(r.url))
+            r.raise_for_status()
+            with tmp.open("wb") as fh:
+                for chunk in r.iter_bytes(65536):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ToolError(tr("File troppo grande (massimo 500 MB)."))
+                    fh.write(chunk)
+        os.replace(tmp, dst)
+    except httpx.HTTPError as exc:
+        raise ToolError(tr("Download non riuscito: {err}").format(err=exc)) from exc
+    finally:
+        tmp.unlink(missing_ok=True)
+    if args.get("open"):
+        platform_os.open_path(dst)
+    size_mb = written / 1_048_576
+    return tr("Ho scaricato {name} ({size:.1f} MB) in {folder}.").format(name=dst.name, size=size_mb, folder=dst.parent)
 
 
 TOOLS = [
@@ -819,10 +908,38 @@ TOOLS = [
     ),
     Tool(
         "run_powershell",
-        "Esegue un comando PowerShell sul PC (ultima risorsa, quando nessun altro strumento basta: "
-        "file, impostazioni, informazioni di sistema, programmi). Restituisce l'output.",
+        "Esegue comandi PowerShell (Windows) o bash/zsh (macOS/Linux) sul computer per automazioni o controlli di sistema.",
         params({"command": {"type": "string"}}, ["command"]),
         run_powershell,
-        timeout=75,
+        timeout=130,
+    ),
+    Tool(
+        "run_python",
+        "Esegue qualsiasi script Python sul PC (automazione, file, grafici, PDF, dati, web, conversioni).",
+        params(
+            {
+                "code": {"type": "string", "description": "codice Python completo da eseguire"},
+                "workdir": {"type": "string", "description": "cartella di lavoro opzionale"},
+                "timeout": {"type": "integer", "description": "secondi max (default 120)"},
+            },
+            ["code"],
+        ),
+        run_python,
+        timeout=190,
+    ),
+    Tool(
+        "download_file",
+        "Scarica un file da qualsiasi URL http/https in Download o nella cartella scelta; open=true lo apre.",
+        params(
+            {
+                "url": {"type": "string"},
+                "filename": {"type": "string", "description": "nome file opzionale"},
+                "folder": {"type": "string", "description": "cartella destinazione (default: download)"},
+                "open": {"type": "boolean"},
+            },
+            ["url"],
+        ),
+        download_file,
+        timeout=130,
     ),
 ]

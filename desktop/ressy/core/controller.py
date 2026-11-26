@@ -105,6 +105,8 @@ TOOL_STATUS = {
     "click_text": tr("Clicco…"),
     "weather": tr("Guardo il meteo…"),
     "edit_video": tr("Edito il video…"),
+    "run_python": tr("Eseguo uno script Python…"),
+    "download_file": tr("Scarico il file…"),
     "run_powershell": tr("Eseguo un comando…"),
 }
 

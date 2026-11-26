@@ -257,6 +257,89 @@ def test_requirements_guards_winrt_for_windows_only() -> None:
         assert 'sys_platform == "win32"' in line
 
 
+def test_qwen_3b_model_and_full_local_tool_parity() -> None:
+    from ressy.config import LOCAL_LLM_MODELS
+    from ressy.tools import Channel, build_registry
+
+    assert "qwen2.5-3b" in LOCAL_LLM_MODELS
+    _, mb, filename, url = LOCAL_LLM_MODELS["qwen2.5-3b"]
+    assert mb <= 2000
+    assert filename == "qwen2.5-3b-instruct-q4_0.gguf"
+    assert "qwen2.5-3b-instruct-q4_0.gguf" in url
+    voice_tools = {s["function"]["name"] for s in build_registry().schemas(Channel("voice"))}
+    assert voice_tools <= set(local_llm.LOCAL_TOOLS_FULL)
+
+
+def test_run_python_download_file_and_secondary_drive_paths(monkeypatch, tmp_path: Path) -> None:
+    from ressy.tools import more
+    from ressy.tools.registry import Channel, ToolContext, ToolError
+
+    ctx = ToolContext(channel=Channel("voice"), services=None)
+    assert more.run_python(ctx, {"code": "print(6 * 7)", "workdir": str(tmp_path)}).strip() == "42"
+    with pytest.raises(ToolError):
+        more.run_python(ctx, {"code": "import sys; sys.exit(2)"})
+    with pytest.raises(ToolError):
+        more.run_python(ctx, {"code": 'import shutil; shutil.rmtree("C:\\\\")'})
+
+    class FakeStream:
+        url = "https://93.184.216.34/demo.txt"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self, _chunk_size):
+            yield b"hello-ressy"
+
+    monkeypatch.setattr(more, "_home", lambda: tmp_path)
+    monkeypatch.setattr(more.winapi, "known_folder", lambda key: str(tmp_path / key))
+    monkeypatch.setattr(more.httpx, "stream", lambda *args, **kwargs: FakeStream())
+    msg = more.download_file(ctx, {"url": "https://93.184.216.34/demo.txt", "filename": "demo.txt"})
+    assert "demo.txt" in msg
+    assert (tmp_path / "downloads" / "demo.txt").read_bytes() == b"hello-ressy"
+    with pytest.raises(ToolError):
+        more.download_file(ctx, {"url": "http://127.0.0.1/secret.txt"})
+
+    resolved = more.resolve_path("E:\\Videos\\clip.mp4")
+    assert str(resolved).lower().endswith("clip.mp4")
+    with pytest.raises(ToolError):
+        more.resolve_path("C:\\Windows\\system32\\drivers\\etc\\hosts")
+
+
+def test_repeat_guard_and_compound_step_continuation() -> None:
+    from ressy.brain.agent import Brain, _Call
+
+    first = {
+        "role": "assistant",
+        "tool_calls": [{"id": "1", "function": {"name": "run_python", "arguments": '{"code": "print(1)"}'}}],
+    }
+    tool_res = {"role": "tool", "name": "run_python", "content": '{"ok": true, "esito": "1"}'}
+    next_diff = {
+        "role": "assistant",
+        "tool_calls": [{"id": "2", "function": {"name": "run_python", "arguments": '{"code": "print(2)"}'}}],
+    }
+    same_dup = {
+        "role": "assistant",
+        "tool_calls": [{"id": "3", "function": {"name": "run_python", "arguments": '{"code": "print(1)"}'}}],
+    }
+    history = [first, tool_res]
+    assert local_llm._repeat_guard(next_diff, history) is next_diff
+    assert local_llm._repeat_guard(same_dup, history) == {"role": "assistant", "content": "1"}
+
+    assert not Brain._step_finished("crea script.py ed eseguilo", [_Call("create_file", True, "ok")])
+    assert Brain._step_finished("crea script.py ed eseguilo", [_Call("run_python", True, "ok")])
+    assert local_llm.result_reply([
+        {"role": "user", "content": "Ora fai solo l'azione 1: crea script.py ed eseguilo"},
+        {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "create_file", "arguments": "{}"}}]},
+        {"role": "tool", "name": "create_file", "content": '{"ok": true, "esito": "Ho creato script.py."}'},
+    ]) is None
+
+
 def test_video_upload_dialog_populates_and_accepts(tmp_path: Path) -> None:
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

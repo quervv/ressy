@@ -78,7 +78,8 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 LOCAL_AI_DETAILS = {
     "": (tr("Nessuna"), tr("Solo le chiavi online")),
     "qwen2.5-0.5b": (tr("Leggera"), tr("Meno di 500 MB: apre app, siti, musica, meteo")),
-    "qwen2.5-1.5b": (tr("Consigliata"), tr("Capisce meglio le richieste lunghe, 1-2 secondi")),
+    "qwen2.5-1.5b": (tr("Consigliata"), tr("Equilibrio ideale su PC, capisce più comandi")),
+    "qwen2.5-3b": (tr("Massima"), tr("Fino a 2 GB: massima intelligenza offline per fare tutto")),
 }
 
 SPEECH_OPTIONS = {
@@ -591,7 +592,7 @@ class LocalAISetup(QWidget):
         for name, (label, detail) in LOCAL_AI_DETAILS.items():
             size = f" · {self._size_text(LOCAL_LLM_MODELS[name][1])}" if name else ""
             cards.append(ChoiceCard(name or "none", f"{label}{size}", detail, compact=True))
-        self.sizes = CardRow(cards)
+        self.sizes = CardRow(cards, columns=2)
         self.sizes.changed.connect(lambda _: self._refresh())
 
         row = QHBoxLayout()

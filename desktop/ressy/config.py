@@ -84,6 +84,8 @@ LOCAL_LLM_MODELS = {
                      "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"),
     "qwen2.5-1.5b": (tr("Consigliata"), 1117, "qwen2.5-1.5b-instruct-q4_k_m.gguf",
                      "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    "qwen2.5-3b": (tr("Massima"), 1998, "qwen2.5-3b-instruct-q4_0.gguf",
+                   "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_0.gguf"),
 }
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5-1.5b"
 

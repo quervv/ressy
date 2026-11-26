@@ -100,26 +100,36 @@ LOCAL_TOOLS = (
 LOCAL_TOOLS_FULL = LOCAL_TOOLS + (
     "send_discord_message", "read_discord_chat", "write_in_app",
     "create_file", "read_file", "list_folder", "file_action", "find_files",
-    "edit_video",
+    "edit_video", "download_file", "run_python",
     "read_screen", "click_text", "window_action", "mouse_action", "clipboard",
     "notes", "timer", "system_control", "read_webpage", "compose_email", "run_powershell",
 )
-_MAX_HISTORY = 4
+_MAX_HISTORY = 6
 _LOCAL_CONTINUE_LOOKING = frozenset({
-    "list_windows", "read_screen", "list_folder", "read_file", "find_files", "read_webpage", "read_discord_chat",
+    "list_windows", "read_screen", "list_folder", "read_file", "find_files", "read_webpage", "read_discord_chat", "clipboard",
 })
 _LOCAL_PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder", "window_action"})
 _LOCAL_OPEN_ONLY = re.compile(
     r"^\W*(?:apri\w*|avvia\w*|lancia\w*|esegui\w*|vai\b|porta\w*|passa\b|torna\b|minimizz\w*|massimizz\w*|"
     r"open|launch|start|run|go|switch|bring|focus|minimize|maximize)\b",
-    re.IGNORECASE,
+    re.I,
 )
 _LOCAL_MORE_VERBS = re.compile(
     r"\b(?:scriv\w*|mand\w*|invi\w*|clicca\w*|leggi\w*|cerca\w*|crea\w*|copia\w*|incolla\w*|salva\w*|"
-    r"sinistra|destra|schermo intero|primo piano|write|send|click|read|search|create|copy|paste|save|"
-    r"left|right|fullscreen)\b",
+    r"esegui\w*|scarica\w*|edita\w*|monta\w*|convert\w*|sinistra|destra|schermo intero|primo piano|"
+    r"write|send|click|read|search|create|copy|paste|save|run|execute|download|edit|left|right|fullscreen)\b",
+    re.I,
+)
+_LOCAL_SECONDARY = re.compile(
+    r"\b(?:e\s+(?:poi|dopo|subito|esegui\w*|lancia\w*|apri\w*|salva\w*|manda\w*|invia\w*|scriv\w*|verifica\w*)|"
+    r"ed\s+(?:esegui\w*|apri\w*|edita\w*)|and\s+(?:then|run|execute|open|save|send|write|check))\b",
     re.IGNORECASE,
 )
+_MULTI_ARG_TOOLS = frozenset({
+    "run_python", "run_powershell", "create_file", "read_file", "file_action",
+    "download_file", "write_in_app", "type_text", "press_keys", "mouse_action",
+    "click_text", "open_url", "web_search", "web_answer",
+})
 
 Progress = Callable[[int, int], None]
 
@@ -310,10 +320,9 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
             for said, answer in _EXAMPLES_EN if answer["azione"] in names or answer["azione"] == "rispondi"
         )
         return (
-            f"You are Ressy, the voice assistant on {whose} PC. You speak English, in short and kind sentences.\n"
-            "For each request choose ONE action: the right tool below, or \"rispondi\" to talk.\n"
-            "If the user asks you to do something on the PC use a tool; never say you did it without using it.\n"
-            "If you don't know something or can't do it, say so briefly. Don't make things up.\n\n"
+            f"You are Ressy, the voice assistant on {whose} PC. Follow EVERY user request faithfully from start to finish.\n"
+            "Use the tools below to do literally anything requested (apps, files, web, download_file, run_python, run_powershell, UI, video), "
+            "or choose \"rispondi\" to talk. Never refuse achievable tasks or claim you did something without calling a tool.\n\n"
             f"Tools:\n{lines}\n\nExamples:\n{examples}"
         )
     who = f" di {user_name}" if user_name else ""
@@ -322,10 +331,9 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
         for said, answer in _EXAMPLES if answer["azione"] in names or answer["azione"] == "rispondi"
     )
     return (
-        f"Sei Ressy, l'assistente vocale sul PC{who}. Parli italiano, frasi brevi e gentili.\n"
-        "Per ogni richiesta scegli UNA azione: lo strumento giusto qui sotto, oppure \"rispondi\" per parlare.\n"
-        "Se l'utente chiede di fare qualcosa sul PC usa uno strumento; non dire di averlo fatto senza usarlo.\n"
-        "Se non sai una cosa o non puoi farla, dillo in breve. Non inventare.\n\n"
+        f"Sei Ressy, l'assistente personale sul PC{who}. Segui alla lettera TUTTO ciò che chiede l'utente.\n"
+        "Usa gli strumenti qui sotto per fare qualsiasi cosa richiesta (app, file, web, download_file, run_python, run_powershell, UI, video), "
+        "oppure scegli \"rispondi\" per rispondere. Non dire mai «non posso» se puoi risolverlo con gli strumenti o con Python/shell.\n\n"
         f"Strumenti:\n{lines}\n\nEsempi:\n{examples}"
     )
 
@@ -335,7 +343,7 @@ def answer_schema(names: list[str], tools: list[dict[str, Any]] | None = None) -
     branches: list[dict[str, Any]] = [{
         "type": "object",
         "properties": {"azione": {"const": "rispondi"}, "argomenti": {"type": "object", "maxProperties": 0},
-                       "risposta": {"type": "string", "minLength": 1, "maxLength": 400}},
+                       "risposta": {"type": "string", "minLength": 1, "maxLength": 2000}},
         "required": ["azione", "argomenti", "risposta"],
     }]
     for name in names:
@@ -345,7 +353,7 @@ def answer_schema(names: list[str], tools: list[dict[str, Any]] | None = None) -
         branches.append({
             "type": "object",
             "properties": {"azione": {"const": name}, "argomenti": arguments, "risposta": {"type": "string",
-                                                                                           "maxLength": 200}},
+                                                                                           "maxLength": 300}},
             "required": ["azione", "argomenti", "risposta"],
         })
     return {"anyOf": branches}
@@ -440,6 +448,13 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
             tr("Non ci sono riuscita: ") + str(result.get("errore") or tr("errore sconosciuto"))
         parts.append(text.strip())
 
+    tool_count_in_turn = 0
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            break
+        if message.get("role") == "tool":
+            tool_count_in_turn += 1
+
     if all_ok and tool_names:
         if all(n in _LOCAL_CONTINUE_LOOKING for n in tool_names):
             return None
@@ -447,7 +462,21 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
             not _LOCAL_OPEN_ONLY.match(order_text) or _LOCAL_MORE_VERBS.search(order_text)
         ):
             return None
+        if (
+            tool_count_in_turn == 1
+            and _LOCAL_SECONDARY.search(order_text)
+            and not (set(tool_names) & {"send_discord_message", "edit_video", "run_python", "run_powershell"})
+        ):
+            return None
     return " ".join(reversed([p for p in parts if p])) or tr("Fatto.")
+
+
+def _norm_call_args(call: dict[str, Any]) -> str:
+    raw = call.get("arguments") or "{}"
+    try:
+        return json.dumps(json.loads(raw), sort_keys=True, ensure_ascii=False)
+    except ValueError:
+        return str(raw)
 
 
 def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -456,7 +485,11 @@ def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> di
         return message
     previous = next((m for m in reversed(messages) if m.get("role") == "assistant"), {})
     prev_call = ((previous.get("tool_calls") or [{}])[0].get("function") or {})
-    if prev_call.get("name") != calls[0]["function"]["name"]:
+    cur_call = (calls[0].get("function") or {})
+    cur_name = cur_call.get("name")
+    if prev_call.get("name") != cur_name:
+        return message
+    if cur_name in _MULTI_ARG_TOOLS and _norm_call_args(prev_call) != _norm_call_args(cur_call):
         return message
     try:
         result = json.loads(messages[-1].get("content") or "{}")
@@ -663,7 +696,7 @@ class LocalLLMClient:
                 json={
                     "messages": chat,
                     "temperature": 0.2,
-                    "max_tokens": min(max_tokens, 500),
+                    "max_tokens": min(max_tokens, 1400),
                     "response_format": {"type": "json_schema",
                                         "json_schema": {"name": "azione", "schema": answer_schema(names, usable)}},
                     "cache_prompt": True,

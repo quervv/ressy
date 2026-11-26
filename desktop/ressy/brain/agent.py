@@ -15,25 +15,30 @@ from .prompts import system_prompt
 
 log = logging.getLogger("ressy.brain")
 
-MAX_STEPS = 10
-MAX_CALLS_PER_STEP = 6
+MAX_STEPS = 16
+MAX_CALLS_PER_STEP = 10
 _INVISIBLE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in (
     (0x200B, 0x200F), (0x2028, 0x202E), (0x2060, 0x2064), (0xFEFF, 0xFEFF))) + "]")
 
 LOOKING = frozenset({
     "list_windows", "read_screen", "list_folder", "read_file", "system_status",
-    "api_usage", "find_files", "read_webpage", "read_discord_chat",
+    "api_usage", "find_files", "read_webpage", "read_discord_chat", "clipboard",
 })
-DATA_TOOLS = LOOKING | frozenset({"weather", "web_answer", "clipboard", "notes", "system_control"})
+DATA_TOOLS = LOOKING | frozenset({"weather", "web_answer", "notes", "system_control", "run_python", "run_powershell"})
 PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder", "window_action"})
-ONCE = frozenset({"send_discord_message", "write_in_app", "reminder", "compose_email"})
+ONCE = frozenset({"send_discord_message", "compose_email"})
 _OPENING = re.compile(
     r"^\W*(?:apri\w*|avvia\w*|lancia\w*|esegui\w*|vai\b|porta\w*|passa\b|torna\b|open|launch|start|run|go|switch|"
     r"bring|focus)", re.IGNORECASE)
 _MORE_THAN_OPEN = re.compile(
     r"\b(?:scriv\w*|mand\w*|invi\w*|clicca\w*|leggi\w*|cerca\w*|crea\w*|copia\w*|incolla\w*|salva\w*|"
-    r"sinistra|destra|schermo intero|primo piano|write|send|click|read|search|create|copy|paste|save|"
-    r"left|right|fullscreen)\b",
+    r"esegui\w*|scarica\w*|edita\w*|monta\w*|aggiung\w*|metti|convert\w*|sinistra|destra|schermo intero|"
+    r"primo piano|write|send|click|read|search|create|copy|paste|save|run|execute|download|edit|add|left|right|fullscreen)\b",
+    re.IGNORECASE,
+)
+_SECONDARY_IN_STEP = re.compile(
+    r"\b(?:e\s+(?:poi|dopo|subito|esegui\w*|lancia\w*|apri\w*|salva\w*|manda\w*|invia\w*|scriv\w*|verifica\w*)|"
+    r"ed\s+(?:esegui\w*|apri\w*|edita\w*)|and\s+(?:then|run|execute|open|save|send|write|check))\b",
     re.IGNORECASE,
 )
 
@@ -339,6 +344,8 @@ class Brain:
         if names <= LOOKING:
             return False
         if names <= PREPARING | LOOKING and (not _OPENING.match(step_text) or _MORE_THAN_OPEN.search(step_text)):
+            return False
+        if _SECONDARY_IN_STEP.search(step_text) and not (names & {"send_discord_message", "edit_video", "run_python", "run_powershell"}):
             return False
         return True
 
