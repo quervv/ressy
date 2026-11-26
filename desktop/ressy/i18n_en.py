@@ -2003,4 +2003,106 @@ EN: dict[str, str] = {
         'Completed',
     'Errore':
         'Error',
+    "Manca l'URL del tuo server AI: inseriscilo nelle impostazioni di Ressy.":
+        'Your AI server URL is missing: enter it in Ressy settings.',
+    "Inserisci l'URL del tuo server AI (Impostazioni › Intelligenza) o avviane uno sul PC.":
+        'Enter your AI server URL (Settings › Brain) or start one on this PC.',
+    'Il tuo server AI':
+        'Your AI server',
+    'Voce + Audio':
+        'Voice + Audio',
+    'Impostazione inquadratura & preparazione color grading ({grade})…':
+        'Setting framing & preparing color grading ({grade})…',
+    'Creo inquadratura & look…':
+        'Creating framing & look…',
+    'Look & Color grading ({grade})':
+        'Look & Color grading ({grade})',
+    'Trascrizione audio & sincronizzazione sottotitoli parola per parola…':
+        'Transcribing audio & syncing word-by-word captions…',
+    'Sincronizzo parole…':
+        'Syncing words…',
+    'Sottotitoli dinamici ({n} card)':
+        'Dynamic captions ({n} cards)',
+    'Creazione slide 3D Grid B-Roll, badge animati, punch zoom & SFX ({tr})…':
+        'Creating 3D Grid B-Roll slides, animated badges, zoom punches & SFX ({tr})…',
+    'Creo B-Roll 3D & SFX…':
+        'Creating 3D B-Roll & SFX…',
+    'B-Roll 3D & grafiche':
+        '3D B-Roll & graphics',
+    'Timeline FX':
+        'FX Timeline',
+    'Questo PC (8088)':
+        'This PC (8088)',
+    'Opzionale (lascia vuoto se non serve)':
+        'Optional (leave blank if not required)',
+    'Connetti':
+        'Connect',
+    'Automatico dal server (o scrivi il nome esatto)':
+        'Auto from server (or type exact model name)',
+    'URL server AI':
+        'AI server URL',
+    'Token (opzionale)':
+        'Token (optional)',
+    'CREA IL TUO SERVER PER IL MODELLO (HOST SU QUESTO PC)':
+        'CREATE YOUR OWN MODEL SERVER (HOST ON THIS PC)',
+    'Scegli .gguf…':
+        'Choose .gguf…',
+    'Accessibile anche in rete / altri PC (0.0.0.0)':
+        'Accessible on network / other PCs (0.0.0.0)',
+    'Genera token':
+        'Generate token',
+    'Crea e avvia server AI':
+        'Create & start AI server',
+    'Puoi servire un modello Qwen già scaricato o un qualsiasi file .gguf, poi collegarci Ressy o un altro PC.':
+        'You can serve a downloaded Qwen model or any .gguf file, then connect Ressy or another PC.',
+    "Inserisci l'URL del tuo server AI o avvia un server su questo PC.":
+        'Enter your AI server URL or start a server on this PC.',
+    'Configurato':
+        'Configured',
+    'Collega Ressy a un <b>tuo</b> server AI OpenAI-compatibile (Ollama, LM Studio, llama.cpp o VPS), oppure creane e avviamone uno direttamente da qui sotto.':
+        'Connect Ressy to <b>your own</b> OpenAI-compatible AI server (Ollama, LM Studio, llama.cpp or VPS), or create and launch one right below.',
+    'Nessun file .gguf trovato (scegli o scarica sotto)':
+        'No .gguf file found (choose or download below)',
+    'Scegli modello GGUF':
+        'Choose GGUF model',
+    'Ferma server AI':
+        'Stop AI server',
+    "<span style='color:{BACKLIGHT}'>Server attivo</span> · Connettiti a: <b>{urls}</b>":
+        "<span style='color:{BACKLIGHT}'>Server running</span> · Connect at: <b>{urls}</b>",
+    'Server AI fermato.':
+        'AI server stopped.',
+    'Scegli prima un file .gguf (oppure scarica un modello locale qui sotto).':
+        'Choose a .gguf file first (or download a local model below).',
+    'Avvio il server del modello AI…':
+        'Starting the AI model server…',
+    'Avvio non riuscito: {err}':
+        'Startup failed: {err}',
+    'Server AI creato e connesso!':
+        'AI server created and connected!',
+    'Usa il tuo server (Ollama, llama.cpp, VPS…).':
+        'Use your own server (Ollama, llama.cpp, VPS…).',
+    'Self-host':
+        'Self-host',
+    'Inserisci prima un URL valido (es. http://127.0.0.1:8088/v1).':
+        'Enter a valid URL first (e.g. http://127.0.0.1:8088/v1).',
+    'Connessione a {url}…':
+        'Connecting to {url}…',
+    'Server connesso! Trovati {n} modelli.':
+        'Server connected! Found {n} models.',
+    'Server connesso!':
+        'Server connected!',
+    "Sottotitoli automatici sincronizzati dall'audio (parola per parola)":
+        'Auto captions synced from audio (word by word)',
+    'Dinamici parola per parola (stile TikTok / Reels)':
+        'Dynamic word by word (TikTok / Reels style)',
+    'Card ad impatto classiche':
+        'Classic impact cards',
+    'Slide 3D / Grafiche B-Roll ed effetti sonori (whoosh, pop)':
+        '3D Slides / B-Roll graphics & sound effects (whoosh, pop)',
+    'Sottotitoli':
+        'Captions',
+    'Hai già provato esattamente questa chiamata ed è fallita: cambia argomenti/strumento o chiedi all\'utente.':
+        'You already tried this exact call and it failed: change the arguments/tool or ask the user.',
+    'A chi devo scrivere su Discord?':
+        'Who should I write to on Discord?',
 }

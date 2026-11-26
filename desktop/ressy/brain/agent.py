@@ -87,6 +87,15 @@ _SECONDARY_IN_STEP = re.compile(
     r"ed\s+(?:esegui\w*|apri\w*|edita\w*)|and\s+(?:then|run|execute|open|save|send|write|check))\b",
     re.IGNORECASE,
 )
+_SCREENSHOT_ASK = re.compile(
+    r"\b(?:screenshot|screen\s*shot|schermata|fotograf\w*|cattura\w*|mostra\w*\s+(?:lo\s+)?schermo|"
+    r"vedi\s+(?:cosa|lo)\s+schermo|guarda\s+(?:lo\s+)?schermo|show\s+(?:me\s+)?(?:the\s+)?screen)\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_screenshot(text: str) -> bool:
+    return bool(_SCREENSHOT_ASK.search(text or ""))
 
 StepHook = Callable[[int, int, str], None]
 
@@ -110,6 +119,7 @@ class _Call:
     ok: bool
     text: str
     ran: bool = True
+    needs_input: bool = False
 
 
 @dataclass
@@ -124,6 +134,7 @@ class _Turn:
     ctx: ToolContext
     on_tool: Callable[[str], None] | None = None
     done_once: dict[tuple[str, str], str] = field(default_factory=dict)
+    failed_calls: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def _parse(output: str) -> dict[str, Any]:
@@ -255,8 +266,26 @@ class Brain:
         except Exception:
             return False
 
+    def _tools_for(self, target_text: str, channel: Channel) -> list[dict[str, Any]]:
+        tools = self.registry.schemas(channel)
+        if self._on_pc() and not _wants_screenshot(target_text):
+            tools = [t for t in tools if (t.get("function") or {}).get("name") != "take_screenshot"]
+        return tools
+
     def _recovery_nudge(self, user_text: str) -> str:
-        if getattr(self.settings, "language", "it") == "en":
+        en = getattr(self.settings, "language", "it") == "en"
+        low = (user_text or "").lower()
+        if "discord" in low or any(w in low for w in ("scrivi", "manda", "invia", "messagg")):
+            if en:
+                return (
+                    f"Do NOT refuse and do NOT take screenshots. For Discord («{user_text}»), call "
+                    "send_discord_message(recipient=..., message=...) right now; if recipient is truly missing, ask who to write to."
+                )
+            return (
+                f"NON dire «non posso» e NON fare screenshot. Per Discord («{user_text}»), chiama subito "
+                "send_discord_message passando recipient (destinatario) e message (testo); se manca il destinatario chiedi «A chi devo scrivere?»."
+            )
+        if en:
             return (
                 f"Do NOT refuse or pretend it is done. Solve the current request («{user_text}») right now using "
                 "your tools: open_app, find_files, web_answer, read_webpage, download_file, run_python, "
@@ -269,7 +298,7 @@ class Brain:
         )
 
     async def _converse(self, messages: list[dict[str, Any]], turn: _Turn, *, user_text: str = "") -> str:
-        tools = self.registry.schemas(turn.ctx.channel)
+        tools = self._tools_for(user_text, turn.ctx.channel)
         models = self._models()
         answer: str | None = None
         nudged = False
@@ -287,7 +316,10 @@ class Brain:
                     continue
                 answer = candidate
                 break
-            await self._run_calls(message, calls, messages, turn, step)
+            ran = await self._run_calls(message, calls, messages, turn, step)
+            asked = next((c.text for c in ran if c.ran and c.needs_input and c.text), "")
+            if asked:
+                return asked
             log.debug("step %d done with %d tool call(s) on %s", step + 1, len(calls), result.model)
 
         if answer is None:
@@ -333,6 +365,9 @@ class Brain:
                 output = json.dumps({"ok": True, "esito": tr("Già fatto poco fa: ") + turn.done_once[key]},
                                     ensure_ascii=False)
                 ran = False
+            elif key in turn.failed_calls:
+                output = _not_run(tr("Hai già provato esattamente questa chiamata ed è fallita: cambia argomenti/strumento o chiedi all'utente."))
+                ran = False
             else:
                 if turn.on_tool is not None:
                     try:
@@ -344,12 +379,14 @@ class Brain:
             messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": output})
             data = _parse(output)
             ok = bool(data.get("ok"))
+            needs_input = bool(data.get("needs_input"))
             said = str(data.get("esito") if ok else data.get("errore") or "")
             if ran and ok and name in ONCE:
                 turn.done_once[key] = said
-            out.append(_Call(name, ok, said, ran))
             if ran and not ok:
+                turn.failed_calls[key] = said
                 failed = True
+            out.append(_Call(name, ok, said, ran, needs_input=needs_input))
         return out
 
     async def _plan(self, text: str) -> list[planner.Step]:
@@ -424,7 +461,7 @@ class Brain:
         return "\n".join(lines)
 
     async def _step_loop(self, messages: list[dict[str, Any]], step: planner.Step, turn: _Turn) -> _StepOutcome:
-        tools = self.registry.schemas(turn.ctx.channel)
+        tools = self._tools_for(step.text, turn.ctx.channel)
         models = self._models()
         last: _Call | None = None
         gathered: list[str] = []
@@ -446,6 +483,9 @@ class Brain:
                     return _StepOutcome("asked" if answer.endswith("?") else "done", answer, ctx_text)
                 return _StepOutcome("done" if last.ok else "failed", answer or last.text, ctx_text)
             ran = [c for c in await self._run_calls(message, calls, messages, turn, round_) if c.ran]
+            asked = next((c.text for c in ran if c.needs_input and c.text), "")
+            if asked:
+                return _StepOutcome("asked", asked, "\n".join(gathered)[:900])
             for c in ran:
                 if c.ok and c.name in DATA_TOOLS and c.text:
                     gathered.append(c.text)
@@ -462,9 +502,10 @@ class Brain:
     @staticmethod
     def _step_finished(step_text: str, ran: list[_Call]) -> bool:
         names = {c.name for c in ran}
-        if names <= LOOKING:
+        looking = LOOKING if _wants_screenshot(step_text) else (LOOKING | {"take_screenshot"})
+        if names <= looking:
             return False
-        if names <= PREPARING | LOOKING and (not _OPENING.match(step_text) or _MORE_THAN_OPEN.search(step_text)):
+        if names <= PREPARING | looking and (not _OPENING.match(step_text) or _MORE_THAN_OPEN.search(step_text)):
             return False
         if _SECONDARY_IN_STEP.search(step_text) and not (names & {"send_discord_message", "edit_video", "run_python", "run_powershell"}):
             return False

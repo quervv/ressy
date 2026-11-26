@@ -38,6 +38,7 @@ _STAGES: list[tuple[str, str]] = [
 _TRACK_COLORS: dict[str, str] = {
     "V3": "#9D6BFF",
     "V2": "#F6AD55",
+    "FX": "#EC4899",
     "V1": "#38BDF8",
     "BG": "#475569",
     "A1": "#4DF0B5",

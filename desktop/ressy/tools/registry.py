@@ -53,6 +53,10 @@ class ToolError(Exception):
     pass
 
 
+class NeedsInputError(ToolError):
+    pass
+
+
 ToolFunc = Callable[[ToolContext, dict[str, Any]], Union[str, Awaitable[str]]]
 
 
@@ -109,7 +113,7 @@ def coerce_args(tool: Tool, raw: dict[str, Any]) -> dict[str, Any]:
         out[name] = value
     missing = [name for name in tool.parameters.get("required", []) if name not in out or out[name] in ("", None)]
     if missing:
-        raise ToolError(tr("mancano gli argomenti: {join}").format(join=', '.join(missing)))
+        raise NeedsInputError(tr("mancano gli argomenti: {join}").format(join=', '.join(missing)))
     return out
 
 
@@ -159,7 +163,8 @@ class ToolRegistry:
                 raise ToolError(tr("argomenti non validi"))
             args = coerce_args(tool, raw)
         except (ValueError, ToolError) as exc:
-            return _result(False, tr("Argomenti non validi: {exc}").format(exc=exc))
+            needs = isinstance(exc, NeedsInputError)
+            return _result(False, tr("Argomenti non validi: {exc}").format(exc=exc), needs_input=needs)
 
         log.info("tool %s %s", name, _redact(args))
         try:
@@ -171,6 +176,9 @@ class ToolRegistry:
                     outcome = await self._run(tool, ctx, args)
             else:
                 outcome = await self._run(tool, ctx, args)
+        except NeedsInputError as exc:
+            log.info("tool %s needs user input: %s", name, exc)
+            return _result(False, str(exc), needs_input=True)
         except ToolError as exc:
             log.info("tool %s refused: %s", name, exc)
             return _result(False, str(exc) + await self._snapshot(tool, ctx))
@@ -216,8 +224,11 @@ class ToolRegistry:
             return ""
 
 
-def _result(ok: bool, message: str) -> str:
-    return json.dumps({"ok": ok, "esito" if ok else "errore": message}, ensure_ascii=False)
+def _result(ok: bool, message: str, *, needs_input: bool = False) -> str:
+    payload: dict[str, Any] = {"ok": ok, "esito" if ok else "errore": message}
+    if needs_input:
+        payload["needs_input"] = True
+    return json.dumps(payload, ensure_ascii=False)
 
 
 _PRIVATE_ARGS = frozenset({"message", "text", "content"})

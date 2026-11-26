@@ -432,10 +432,65 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _transcribe_clip_phrases(ctx: ToolContext, clip: ClipInfo) -> list[str]:
+def _aspect_matches(clip: ClipInfo, size: tuple[int, int]) -> bool:
+    c_ratio = clip.width / max(1, clip.height)
+    t_ratio = size[0] / max(1, size[1])
+    return ((clip.width >= clip.height) == (size[0] >= size[1])) and abs(c_ratio - t_ratio) <= 0.45
+
+
+def _voiced_span(pcm: Any, rate: int = 16000) -> tuple[float, float]:
+    import numpy as np
+
+    dur = len(pcm) / max(1, rate)
+    if len(pcm) < rate * 0.5:
+        return 0.0, dur
+    win = max(1, int(rate * 0.1))
+    n = len(pcm) // win
+    if n <= 0:
+        return 0.0, dur
+    rms = np.sqrt(np.mean(pcm[: n * win].reshape(n, win) ** 2, axis=1))
+    thresh = max(0.012, float(np.percentile(rms, 35)) * 1.8)
+    active = np.where(rms >= thresh)[0]
+    if active.size == 0:
+        return 0.0, dur
+    return round(float(active[0]) * 0.1, 2), round(min(dur, (float(active[-1]) + 1.0) * 0.1), 2)
+
+
+def _chunk_words_into_timeline(
+    segments: list[dict[str, Any]],
+    *,
+    uppercase: bool,
+    max_words_per_chunk: int = 2,
+) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for seg in segments:
+        raw = str(seg.get("text") or "").strip()
+        words = [w for w in raw.split() if w]
+        if not words:
+            continue
+        s0 = float(seg.get("start", 0.0))
+        s1 = max(s0 + 0.35, float(seg.get("end", s0 + max(0.8, len(words) * 0.34))))
+        span = s1 - s0
+        groups = [words[i : i + max_words_per_chunk] for i in range(0, len(words), max_words_per_chunk)]
+        weights = [sum(len(w) + 1 for w in g) for g in groups]
+        total_w = max(1, sum(weights))
+        cur = s0
+        for g, wt in zip(groups, weights, strict=True):
+            dur = max(0.28, span * (wt / total_w))
+            label = " ".join(g)
+            chunks.append({
+                "text": label.upper() if uppercase else label,
+                "start_s": round(cur, 2),
+                "duration_s": round(dur, 2),
+            })
+            cur += dur
+    return chunks
+
+
+def _transcribe_clip_segments(ctx: ToolContext, clip: ClipInfo, *, uppercase: bool = False) -> list[dict[str, Any]]:
     ffmpeg = find_ffmpeg()
     stt = getattr(ctx.services, "stt", None)
-    if not ffmpeg or stt is None or not clip.has_audio or clip.duration_s > 180:
+    if not ffmpeg or not clip.has_audio or clip.duration_s > 180:
         return []
     wav_file = None
     try:
@@ -452,28 +507,51 @@ def _transcribe_clip_phrases(ctx: ToolContext, clip: ClipInfo) -> list[str]:
             pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
         if len(pcm) < 8000:
             return []
-        if hasattr(stt, "transcribe_pcm"):
-            res = asyncio.run(stt.transcribe_pcm(pcm, 16000, lenient=True))
-            text = str(getattr(res, "text", "") or "")
-        elif hasattr(stt, "transcribe_sync"):
-            text = stt.transcribe_sync(pcm, 16000)
-        else:
-            text = ""
-        words = [w.strip() for w in (text or "").split() if w.strip()]
-        if not words:
-            return []
-        out: list[str] = []
-        for i in range(0, len(words), 4):
-            chunk = " ".join(words[i:i + 4]).upper()
-            if chunk:
-                out.append(chunk)
-        return out[:10]
+
+        segments: list[dict[str, Any]] = []
+        plain_text = ""
+
+        local_whisper = getattr(stt, "local", None) if stt is not None else None
+        if local_whisper is None and stt is not None and hasattr(stt, "transcribe"):
+            local_whisper = stt
+        if local_whisper is not None and hasattr(local_whisper, "transcribe") and stt is not None:
+            from ..speech import local_stt
+
+            settings = getattr(ctx.services, "settings", None)
+            mname = getattr(settings, "local_stt_model", "base-q5_1") if settings else "base-q5_1"
+            lang = getattr(settings, "language", "it") if settings else "it"
+            if not local_stt.is_downloaded(mname):
+                for cand in ("small-q5_1", "base-q5_1", "tiny-q5_1"):
+                    if local_stt.is_downloaded(cand):
+                        mname = cand
+                        break
+            if local_stt.is_downloaded(mname):
+                payload = local_whisper.transcribe(pcm, name=mname, language=lang, prompt="")
+                segments = [s for s in (payload.get("segments") or []) if str(s.get("text") or "").strip()]
+                plain_text = str(payload.get("text") or "")
+
+        if not segments and stt is not None:
+            if hasattr(stt, "transcribe_pcm"):
+                res = asyncio.run(stt.transcribe_pcm(pcm, 16000, lenient=True))
+                plain_text = str(getattr(res, "text", "") or "")
+            elif hasattr(stt, "transcribe_sync"):
+                plain_text = stt.transcribe_sync(pcm, 16000)
+
+        if not segments and plain_text.strip():
+            v0, v1 = _voiced_span(pcm, 16000)
+            segments = [{"text": plain_text.strip(), "start": v0, "end": max(v0 + 1.0, v1)}]
+
+        return _chunk_words_into_timeline(segments, uppercase=uppercase, max_words_per_chunk=2)[:42]
     except Exception:
         log.debug("video STT phrase extraction skipped", exc_info=True)
         return []
     finally:
         if wav_file is not None:
             wav_file.unlink(missing_ok=True)
+
+
+def _transcribe_clip_phrases(ctx: ToolContext, clip: ClipInfo) -> list[str]:
+    return [c["text"] for c in _transcribe_clip_segments(ctx, clip, uppercase=True)[:10]]
 
 
 def _plan_impact_phrases(
@@ -485,43 +563,155 @@ def _plan_impact_phrases(
     explicit_phrases: list[str],
     style: str,
     use_stt: bool = True,
+    caption_mode: str = "word",
 ) -> list[dict[str, Any]]:
     palette = _STYLE_PALETTES.get(style, _STYLE_PALETTES["viral"])
     colors = palette["text_colors"]
-    phrases: list[str] = [p.strip().upper() for p in explicit_phrases if p.strip()]
-    if not phrases and use_stt:
-        for clip in clips[:2]:
-            phrases.extend(_transcribe_clip_phrases(ctx, clip))
-            if len(phrases) >= 6:
-                break
-    if not phrases:
+    kinetic_word = caption_mode == "word" and style in ("viral", "gaming", "vlog")
+    hook_style = "hook_pov" if (title.strip().upper().startswith("POV:") or style == "vlog") else "hook_neon"
+
+    timed_chunks: list[dict[str, Any]] = []
+    cleaned_explicit = [p.strip() for p in explicit_phrases if p.strip()]
+    if cleaned_explicit:
+        if kinetic_word and any(len(p.split()) > 4 for p in cleaned_explicit):
+            joined = " ".join(cleaned_explicit)
+            timed_chunks = _chunk_words_into_timeline(
+                [{"text": joined, "start": 0.15, "end": max(1.2, total_s - 0.15)}],
+                uppercase=(style == "gaming"),
+                max_words_per_chunk=2,
+            )
+        else:
+            slot = total_s / max(1, len(cleaned_explicit) + (1 if title.strip() else 0))
+            offset = slot if title.strip() else 0.0
+            for idx, text in enumerate(cleaned_explicit):
+                timed_chunks.append({
+                    "text": text.upper() if len(text.split()) <= 4 else text,
+                    "start_s": round(offset + idx * slot + 0.1, 2),
+                    "duration_s": round(max(1.0, slot - 0.18), 2),
+                    "mode": "pill" if caption_mode == "phrase" else "word",
+                })
+    elif use_stt:
+        cursor = 0.0
+        for clip in clips[:3]:
+            segs = _transcribe_clip_segments(ctx, clip, uppercase=(style == "gaming"))
+            for s in segs:
+                s["start_s"] = round(s["start_s"] + cursor, 2)
+                timed_chunks.append(s)
+            cursor += clip.duration_s
+
+    if not timed_chunks:
         settings = getattr(ctx.services, "settings", None)
         lang = getattr(settings, "language", "it") if settings else "it"
         defaults = palette["phrases_en"] if lang == "en" else palette["phrases_it"]
-        phrases = list(defaults)
-    if title.strip():
-        hook = title.strip().upper()
-        if not phrases or phrases[0] != hook:
-            phrases.insert(0, hook)
-    count = min(max(1, len(phrases)), max(2, int(total_s / 2.2)))
-    phrases = phrases[:count]
-    slot = total_s / max(1, len(phrases))
+        slot = total_s / max(1, len(defaults))
+        for idx, text in enumerate(defaults):
+            timed_chunks.append({
+                "text": text,
+                "start_s": round(idx * slot + 0.12, 2),
+                "duration_s": round(max(1.1, slot - 0.2), 2),
+                "mode": "word" if kinetic_word else "pill",
+            })
+
     timeline: list[dict[str, Any]] = []
-    for idx, text in enumerate(phrases):
-        start = round(idx * slot + (0.08 if idx == 0 else 0.15), 2)
-        dur = round(max(1.2, slot - 0.22), 2)
-        if start + dur > total_s:
-            dur = max(0.8, round(total_s - start, 2))
+    if title.strip():
+        hook_dur = min(2.8, max(1.6, total_s * 0.28))
         timeline.append({
-            "index": idx,
-            "text": text,
-            "start_s": start,
-            "duration_s": dur,
-            "color": colors[idx % len(colors)],
+            "index": 0,
+            "text": title.strip().upper(),
+            "start_s": 0.08,
+            "duration_s": round(hook_dur, 2),
+            "color": "#3CEBFF" if style in ("viral", "gaming") else colors[0],
             "pill": palette["pill_bg"],
-            "is_hook": idx == 0,
+            "is_hook": True,
+            "mode": hook_style,
+        })
+
+    base_idx = len(timeline)
+    for k, ch in enumerate(timed_chunks):
+        st = max(0.05, float(ch["start_s"]))
+        if st >= total_s - 0.15:
+            continue
+        dur = min(float(ch["duration_s"]), max(0.25, total_s - st))
+        word_clean = re.sub(r"[^\w]+", "", ch["text"])
+        accent = (k % 5 == 2) or len(word_clean) >= 9
+        timeline.append({
+            "index": base_idx + k,
+            "text": ch["text"],
+            "start_s": round(st, 2),
+            "duration_s": round(dur, 2),
+            "color": colors[k % len(colors)] if accent else "#FFFFFF",
+            "pill": palette["pill_bg"],
+            "is_hook": (k == 0 and not title.strip()),
+            "mode": ch.get("mode") or ("word" if kinetic_word else "pill"),
         })
     return timeline
+
+
+_BROLL_KEYWORDS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(?:browser|gologin|chrome|web|sito|link|pagina|proxy)\b", re.I), "browser"),
+    (re.compile(r"\b(?:telefon\w*|account|app|vinted|social|tiktok|instagram|discord)\b", re.I), "phone"),
+    (re.compile(r"\b(?:crea\w*|ai|bot|smart|veloce|subito|adesso|segret\w*)\b", re.I), "spark"),
+    (re.compile(r"\b(?:sicur\w*|blocc\w*|confond\w*|prote\w*|privacy)\b", re.I), "shield"),
+    (re.compile(r"\b(?:video|youtube|edita\w*|monta\w*|studio|capcut)\b", re.I), "play"),
+]
+
+
+def _pick_icon_kind(text: str, idx: int) -> str:
+    for pat, icon in _BROLL_KEYWORDS:
+        if pat.search(text):
+            return icon
+    return ("spark", "browser", "phone", "play", "shield")[idx % 5]
+
+
+def _plan_broll_elements(
+    phrases: list[dict[str, Any]],
+    total_s: float,
+    *,
+    enabled: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not enabled or total_s < 4.5:
+        return [], []
+    body = [ph for ph in phrases if not ph.get("is_hook") and ph["start_s"] >= 2.0 and ph["start_s"] <= total_s - 1.1]
+    if not body:
+        return [], []
+
+    slides: list[dict[str, Any]] = []
+    badges: list[dict[str, Any]] = []
+    last_fx_t = 1.4
+    max_slides = min(3, max(1, int(total_s // 5.5)))
+    max_badges = min(3, max(1, int(total_s // 5.0)))
+    step = max(1, len(body) // (max_slides + max_badges + 1))
+
+    for idx in range(0, len(body), step):
+        ph = body[idx]
+        st = float(ph["start_s"])
+        if st - last_fx_t < 1.9:
+            continue
+        word = ph["text"].strip().split()[0][:18]
+        icon = _pick_icon_kind(ph["text"], len(slides) + len(badges))
+        want_slide = len(slides) < max_slides and (len(slides) <= len(badges) or len(badges) >= max_badges)
+        if want_slide:
+            variant = "warp_grid" if len(slides) % 2 == 0 else "radial_glow"
+            dur = round(min(0.88, max(0.60, total_s - st - 0.3)), 2)
+            slides.append({
+                "text": word,
+                "subtitle": ph["text"],
+                "icon": icon,
+                "variant": variant,
+                "start_s": round(st, 2),
+                "duration_s": dur,
+            })
+            last_fx_t = st + dur
+        elif len(badges) < max_badges:
+            dur = round(min(1.20, max(0.80, total_s - st - 0.3)), 2)
+            badges.append({
+                "text": word,
+                "icon": icon,
+                "start_s": round(st, 2),
+                "duration_s": dur,
+            })
+            last_fx_t = st + dur
+    return slides, badges
 
 
 def _extract_frame(clip: Path, at_s: float, dst: Path) -> bool:
@@ -558,6 +748,186 @@ def _grade_pil_image(img: Image.Image, color_grade: str) -> Image.Image:
     return out
 
 
+def _draw_vector_icon(draw: ImageDraw.ImageDraw, icon: str, cx: int, cy: int, r: int, fg: tuple[int, int, int, int]) -> None:
+    if icon == "phone":
+        pw, ph = int(r * 0.85), int(r * 1.35)
+        draw.rounded_rectangle([cx - pw // 2, cy - ph // 2, cx + pw // 2, cy + ph // 2], radius=max(8, pw // 6), fill=(26, 28, 38, 255), outline=fg, width=4)
+        draw.rounded_rectangle([cx - pw // 2 + 8, cy - ph // 2 + 12, cx + pw // 2 - 8, cy + ph // 2 - 14], radius=6, fill=(242, 245, 252, 255))
+    elif icon == "browser":
+        bw, bh = int(r * 1.45), int(r * 1.05)
+        x0, y0, x1, y1 = cx - bw // 2, cy - bh // 2, cx + bw // 2, cy + bh // 2
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=12, fill=(24, 26, 36, 255), outline=fg, width=4)
+        draw.line([(x0 + 4, y0 + bh // 4), (x1 - 4, y0 + bh // 4)], fill=fg, width=3)
+        for k in range(3):
+            dx = x0 + 18 + k * 14
+            draw.ellipse([dx - 4, y0 + bh // 8 - 4, dx + 4, y0 + bh // 8 + 4], fill=fg)
+        draw.line([(cx - bw // 4, cy + 4), (cx + bw // 4, cy + 4)], fill=(255, 255, 255, 210), width=4)
+    elif icon == "shield":
+        pts = [(cx, cy - r), (cx + int(r * 0.85), cy - int(r * 0.55)), (cx + int(r * 0.7), cy + int(r * 0.35)), (cx, cy + r), (cx - int(r * 0.7), cy + int(r * 0.35)), (cx - int(r * 0.85), cy - int(r * 0.55))]
+        draw.polygon(pts, fill=(26, 30, 44, 255), outline=fg, width=4)
+        draw.line([(cx - r // 3, cy), (cx - 2, cy + r // 3), (cx + r // 2, cy - r // 3)], fill=fg, width=5)
+    elif icon == "play":
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(24, 26, 36, 255), outline=fg, width=4)
+        tri = [(cx - r // 4, cy - r // 2), (cx + r // 2, cy), (cx - r // 4, cy + r // 2)]
+        draw.polygon(tri, fill=fg)
+    else:
+        pts = [(cx + int(r * 0.1), cy - r), (cx - int(r * 0.45), cy + 4), (cx + int(r * 0.05), cy + 4), (cx - int(r * 0.1), cy + r), (cx + int(r * 0.45), cy - 4), (cx - int(r * 0.05), cy - 4)]
+        draw.polygon(pts, fill=fg, outline=(18, 20, 28, 255))
+
+
+def _render_cutaway_slide(
+    dst: Path,
+    keyword: str,
+    subtitle: str,
+    icon_kind: str,
+    size: tuple[int, int],
+    *,
+    variant: str = "warp_grid",
+) -> None:
+    w, h = size
+    canvas = Image.new("RGBA", (w, h), (242, 244, 249, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    vignette = Image.new("RGBA", (w, h), (150, 156, 172, 130))
+    vd = ImageDraw.Draw(vignette)
+    vd.ellipse([-int(w * 0.15), int(h * 0.08), int(w * 1.15), int(h * 0.92)], fill=(250, 251, 255, 255))
+    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=max(45, w // 9)))
+    canvas = Image.alpha_composite(canvas, vignette)
+    draw = ImageDraw.Draw(canvas)
+
+    if variant == "warp_grid":
+        grid = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(grid)
+        cols = 14
+        rows = 24
+        cx, cy = w * 0.5, h * 0.48
+        for i in range(-1, cols + 2):
+            pts: list[tuple[float, float]] = []
+            bx = (i / cols) * w
+            for j in range(rows + 1):
+                py = (j / rows) * h
+                dx = (bx - cx) / max(1.0, w * 0.5)
+                dy = (py - cy) / max(1.0, h * 0.5)
+                bow = 1.0 + 0.14 * (1.0 - dy * dy)
+                pts.append((cx + dx * (w * 0.5) * bow, py))
+            gd.line(pts, fill=(182, 190, 208, 120), width=2)
+        for j in range(-1, rows + 2):
+            pts = []
+            by = (j / rows) * h
+            for i in range(cols + 1):
+                px = (i / cols) * w
+                dx = (px - cx) / max(1.0, w * 0.5)
+                dy = (by - cy) / max(1.0, h * 0.5)
+                bow = 1.0 + 0.12 * (1.0 - dx * dx)
+                pts.append((px, cy + dy * (h * 0.5) * bow))
+            gd.line(pts, fill=(182, 190, 208, 120), width=2)
+        canvas = Image.alpha_composite(canvas, grid)
+        draw = ImageDraw.Draw(canvas)
+
+        card_sz = max(170, int(w * 0.34))
+        cx_i, cy_i = w // 2, int(h * 0.44)
+        shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(shadow)
+        sd.rounded_rectangle([cx_i - card_sz // 2, cy_i - card_sz // 2 + 16, cx_i + card_sz // 2, cy_i + card_sz // 2 + 16], radius=32, fill=(20, 24, 38, 120))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=18))
+        canvas = Image.alpha_composite(canvas, shadow)
+        draw = ImageDraw.Draw(canvas)
+        draw.rounded_rectangle(
+            [cx_i - card_sz // 2, cy_i - card_sz // 2, cx_i + card_sz // 2, cy_i + card_sz // 2],
+            radius=32,
+            fill=(24, 26, 34, 245),
+            outline=(157, 107, 255, 220),
+            width=4,
+        )
+        _draw_vector_icon(draw, icon_kind, cx_i, cy_i, card_sz // 3, (77, 240, 181, 255))
+    else:
+        f_big = max(62, int(w * 0.11))
+        font = _load_font(f_big)
+        text = keyword.strip()
+        b = draw.textbbox((0, 0), text, font=font)
+        tw, th = b[2] - b[0], b[3] - b[1]
+        tx, ty = (w - tw) // 2, (h - th) // 2 - th // 6
+        glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.text((tx - 4, ty), text, font=font, fill=(0, 220, 255, 190))
+        gd.text((tx + 4, ty), text, font=font, fill=(255, 70, 95, 190))
+        glow = glow.filter(ImageFilter.GaussianBlur(radius=3))
+        canvas = Image.alpha_composite(canvas, glow)
+        draw = ImageDraw.Draw(canvas)
+        draw.text((tx, ty), text, font=font, fill=(14, 16, 22, 255))
+
+    canvas.convert("RGB").save(dst, "PNG")
+
+
+def _render_floating_badge(dst: Path, label: str, icon_kind: str, size: tuple[int, int]) -> None:
+    w, h = size
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    rad = max(58, int(w * 0.12))
+    cx, cy = w // 2, int(h * 0.56)
+
+    glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.ellipse([cx - rad - 10, cy - rad - 10, cx + rad + 10, cy + rad + 10], fill=(77, 240, 181, 140))
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=18))
+    img = Image.alpha_composite(img, glow)
+    draw = ImageDraw.Draw(img)
+
+    draw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=(18, 22, 30, 240), outline=(77, 240, 181, 255), width=5)
+    _draw_vector_icon(draw, icon_kind, cx, cy, int(rad * 0.58), (77, 240, 181, 255))
+    img.save(dst, "PNG")
+
+
+def _synthesize_sfx_wav(dst: Path, total_s: float, events: list[tuple[str, float]]) -> bool:
+    if not events or total_s <= 0.4:
+        return False
+    try:
+        import math
+        import numpy as np
+
+        rate = 44100
+        total_n = max(rate, int(round(total_s * rate)))
+        buf = np.zeros(total_n, dtype=np.float32)
+        rng = np.random.default_rng(7)
+
+        for kind, when_s in events:
+            start = max(0, min(total_n - 1000, int(round(when_s * rate))))
+            if kind == "sub":
+                n = min(int(0.45 * rate), total_n - start)
+                t = np.linspace(0, n / rate, n, dtype=np.float32)
+                freq = 92.0 * np.exp(-t * 3.8) + 34.0
+                sig = np.sin(2.0 * math.pi * np.cumsum(freq) / rate) * np.exp(-t * 6.0) * 0.55
+                buf[start : start + n] += sig
+            elif kind == "pop":
+                n = min(int(0.14 * rate), total_n - start)
+                t = np.linspace(0, n / rate, n, dtype=np.float32)
+                freq = 540.0 + 420.0 * np.exp(-t * 35.0)
+                sig = np.sin(2.0 * math.pi * np.cumsum(freq) / rate) * np.exp(-t * 24.0) * 0.35
+                buf[start : start + n] += sig
+            else:
+                n = min(int(0.28 * rate), total_n - start)
+                t = np.linspace(0, 1, n, dtype=np.float32)
+                env = np.maximum(0.0, np.sin(math.pi * t)) ** 1.6
+                noise = rng.normal(0.0, 1.0, n).astype(np.float32)
+                kernel = np.ones(18, dtype=np.float32) / 18.0
+                smooth = np.convolve(noise, kernel, mode="same")
+                buf[start : start + n] += smooth * env * 0.32
+
+        peak = float(np.max(np.abs(buf)))
+        if peak > 0.9:
+            buf = buf * (0.85 / peak)
+        pcm16 = np.clip(buf * 32767.0, -32768, 32767).astype(np.int16)
+        stereo = np.column_stack([pcm16, pcm16]).tobytes()
+        with wave.open(str(dst), "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(stereo)
+        return dst.is_file()
+    except Exception:
+        log.debug("SFX generation skipped", exc_info=True)
+        return False
+
+
 def _render_composite_preview(
     dst: Path,
     bg_path: Path,
@@ -568,25 +938,32 @@ def _render_composite_preview(
     color_grade: str = "vivid",
     show_progress_bar: bool = True,
     progress_frac: float = 0.5,
+    fullscreen_fill: bool = True,
 ) -> None:
     try:
         pw, ph = 540, max(304, int(round(540 * (size[1] / max(1, size[0])))))
-        if bg_path.is_file():
+        if bg_path.is_file() and not fullscreen_fill:
             canvas = Image.open(bg_path).convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
         else:
             canvas = Image.new("RGBA", (pw, ph), (16, 17, 24, 255))
 
         if raw_frame is not None and raw_frame.is_file():
             fg = _grade_pil_image(Image.open(raw_frame), color_grade)
-            fg_w, fg_h = int(pw * 0.90), int(ph * 0.90)
-            scale = min(fg_w / max(1, fg.width), fg_h / max(1, fg.height))
-            nw, nh = max(2, int(fg.width * scale)), max(2, int(fg.height * scale))
-            fg_rs = fg.resize((nw, nh), Image.Resampling.LANCZOS).convert("RGBA")
-            x = (pw - nw) // 2
-            y = (ph - nh) // 2
-            mask = Image.new("L", (nw, nh), 0)
-            ImageDraw.Draw(mask).rounded_rectangle([0, 0, nw, nh], radius=16, fill=255)
-            canvas.paste(fg_rs, (x, y), mask)
+            if fullscreen_fill:
+                scale = max(pw / max(1, fg.width), ph / max(1, fg.height))
+                nw, nh = max(2, int(fg.width * scale)), max(2, int(fg.height * scale))
+                fg_rs = fg.resize((nw, nh), Image.Resampling.LANCZOS).convert("RGBA")
+                lx, ly = max(0, (nw - pw) // 2), max(0, (nh - ph) // 2)
+                canvas = fg_rs.crop((lx, ly, lx + pw, ly + ph))
+            else:
+                fg_w, fg_h = int(pw * 0.90), int(ph * 0.90)
+                scale = min(fg_w / max(1, fg.width), fg_h / max(1, fg.height))
+                nw, nh = max(2, int(fg.width * scale)), max(2, int(fg.height * scale))
+                fg_rs = fg.resize((nw, nh), Image.Resampling.LANCZOS).convert("RGBA")
+                x, y = (pw - nw) // 2, (ph - nh) // 2
+                mask = Image.new("L", (nw, nh), 0)
+                ImageDraw.Draw(mask).rounded_rectangle([0, 0, nw, nh], radius=16, fill=255)
+                canvas.paste(fg_rs, (x, y), mask)
 
         if card_path is not None and card_path.is_file():
             card = Image.open(card_path).convert("RGBA").resize((pw, ph), Image.Resampling.LANCZOS)
@@ -677,7 +1054,81 @@ def _wrap_text(text: str, font: Any, draw: ImageDraw.ImageDraw, max_w: int) -> l
 def _render_phrase_card(dst: Path, phrase: dict[str, Any], size: tuple[int, int]) -> None:
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    mode = str(phrase.get("mode") or ("hook_neon" if phrase.get("is_hook") else "word"))
     draw = ImageDraw.Draw(img)
+
+    if mode == "hook_pov":
+        fsize = max(40, int(w * 0.058))
+        font = _load_font(fsize)
+        raw_parts = [p.strip() for p in phrase["text"].replace("|", "\n").replace("/", "\n").splitlines() if p.strip()]
+        lines = [ln for p in raw_parts for ln in _wrap_text(p, font, draw, int(w * 0.80))] or _wrap_text(phrase["text"], font, draw, int(w * 0.80))
+        cur_y = max(48, int(h * 0.14))
+        for ln in lines[:3]:
+            b = draw.textbbox((0, 0), ln, font=font)
+            tw, th = b[2] - b[0], max(fsize, b[3] - b[1])
+            px, py = int(w * 0.045), int(fsize * 0.25)
+            bx = (w - tw - px * 2) // 2
+            bw, bh = tw + px * 2, th + py * 2
+            sh = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle([bx, cur_y + 6, bx + bw, cur_y + bh + 6], radius=20, fill=(0, 0, 0, 130))
+            img = Image.alpha_composite(img, sh.filter(ImageFilter.GaussianBlur(radius=8)))
+            draw = ImageDraw.Draw(img)
+            draw.rounded_rectangle([bx, cur_y, bx + bw, cur_y + bh], radius=20, fill=(255, 255, 255, 245))
+            draw.text((bx + px, cur_y + py - 2), ln, font=font, fill=(16, 18, 24, 255))
+            cur_y += bh + int(fsize * 0.18)
+        img.save(dst, "PNG")
+        return
+
+    if mode == "hook_neon":
+        fsize = max(48, int(w * 0.072))
+        font = _load_font(fsize)
+        raw_parts = [p.strip() for p in phrase["text"].replace("|", "\n").replace("/", "\n").splitlines() if p.strip()]
+        lines = [ln for p in raw_parts for ln in _wrap_text(p, font, draw, int(w * 0.86))] or _wrap_text(phrase["text"], font, draw, int(w * 0.86))
+        fg_rgba = _hex_to_rgba(phrase["color"])
+        glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        cur_y = max(44, int(h * 0.13))
+        coords: list[tuple[str, int, int]] = []
+        for idx, ln in enumerate(lines[:3]):
+            cur_font = font if idx == 0 else _load_font(max(34, int(fsize * 0.72)))
+            b = draw.textbbox((0, 0), ln, font=cur_font)
+            tw, th = b[2] - b[0], max(fsize, b[3] - b[1])
+            tx = (w - tw) // 2
+            gd.text((tx, cur_y), ln, font=cur_font, fill=(*fg_rgba[:3], 180))
+            coords.append((ln, tx, cur_y))
+            cur_y += th + int(fsize * 0.16)
+        img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(radius=14)))
+        draw = ImageDraw.Draw(img)
+        for idx, (ln, tx, cy_line) in enumerate(coords):
+            cur_font = font if idx == 0 else _load_font(max(34, int(fsize * 0.72)))
+            col = fg_rgba if idx == 0 else (255, 255, 255, 255)
+            draw.text((tx, cy_line), ln, font=cur_font, fill=col, stroke_width=5, stroke_fill=(10, 12, 18, 245))
+        img.save(dst, "PNG")
+        return
+
+    if mode == "word":
+        fsize = max(48, int(w * 0.068))
+        font = _load_font(fsize)
+        lines = _wrap_text(phrase["text"], font, draw, int(w * 0.84))
+        fg_rgba = _hex_to_rgba(phrase["color"])
+        glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        cur_y = int(h * 0.73) - (len(lines) * fsize) // 2
+        positions: list[tuple[str, int, int]] = []
+        for ln in lines[:2]:
+            b = draw.textbbox((0, 0), ln, font=font)
+            tw = b[2] - b[0]
+            tx = (w - tw) // 2
+            gd.text((tx, cur_y + 5), ln, font=font, fill=(0, 0, 0, 210))
+            positions.append((ln, tx, cur_y))
+            cur_y += int(fsize * 1.18)
+        img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(radius=10)))
+        draw = ImageDraw.Draw(img)
+        for ln, tx, ty in positions:
+            draw.text((tx, ty), ln, font=font, fill=fg_rgba, stroke_width=6, stroke_fill=(10, 11, 15, 250))
+        img.save(dst, "PNG")
+        return
+
     fsize = max(44, int(w * (0.068 if phrase.get("is_hook") else 0.056)))
     font = _load_font(fsize)
     lines = _wrap_text(phrase["text"], font, draw, int(w * 0.84))
@@ -781,6 +1232,10 @@ def _build_capcut_draft(
     *,
     color_grade: str = "vivid",
     transition: str = "smooth",
+    broll_pngs: list[tuple[dict[str, Any], Path]] = (),
+    badge_pngs: list[tuple[dict[str, Any], Path]] = (),
+    sfx_path: Path | None = None,
+    fullscreen_fill: bool = False,
 ) -> Path:
     draft_folder = drafts_root / project_name
     draft_folder.mkdir(parents=True, exist_ok=True)
@@ -929,10 +1384,12 @@ def _build_capcut_draft(
             seg_dur = min(beat_us, clip_us - pos)
             if clip_us - (pos + seg_dur) < 900_000:
                 seg_dur = clip_us - pos
-            base_scale = 0.92
+            base_scale = 1.0 if fullscreen_fill else 0.92
             alt_punch = (beat_idx + c_idx) % 2 == 1
-            seg_scale = 1.01 if (use_zoom and alt_punch) else base_scale
-            end_scale = 0.96 if (use_zoom and not alt_punch) else (1.06 if use_zoom else seg_scale)
+            seg_scale = (1.08 if fullscreen_fill else 1.01) if (use_zoom and alt_punch) else base_scale
+            end_scale = (1.04 if fullscreen_fill else 0.96) if (use_zoom and not alt_punch) else (
+                (1.12 if fullscreen_fill else 1.06) if use_zoom else seg_scale
+            )
             refs = _aux_refs()
             anim_id = _cap_uid()
             mats["material_animations"].append({"id": anim_id, "type": "sticker_animation", "animations": [], "multi_language_current": "none"})
@@ -1029,8 +1486,30 @@ def _build_capcut_draft(
         )
 
     tracks = [bg_track, fg_track]
+
+    fx_segments: list[dict[str, Any]] = []
+    for item, png in [*broll_pngs, *badge_pngs]:
+        if not png.is_file():
+            continue
+        f_st = int(round(float(item["start_s"]) * 1_000_000))
+        f_dur = max(300_000, int(round(float(item["duration_s"]) * 1_000_000)))
+        if f_st >= total_us:
+            continue
+        f_dur = min(f_dur, total_us - f_st)
+        f_mid = _video_mat(png, w, h, f_dur, mtype="photo", has_audio=False)
+        fx_segments.append(_make_seg(f_mid, _aux_refs(), 0, f_dur, f_st, f_dur, scale=1.0, volume=0.0, render_idx=12))
+    if fx_segments:
+        tracks.append({"id": _cap_uid(), "type": "video", "segments": fx_segments, "flag": 0, "attribute": 0, "name": "", "is_default_name": True})
+
     if text_segments:
         tracks.append({"id": _cap_uid(), "type": "text", "segments": text_segments, "flag": 1, "attribute": 0, "name": "", "is_default_name": True})
+
+    if sfx_path and sfx_path.is_file():
+        s_mid = _cap_uid()
+        mats["audios"].append({"id": s_mid, "type": "sound", "path": sfx_path.as_posix(), "name": sfx_path.name, "duration": total_us})
+        s_seg = _make_seg(s_mid, _aux_refs()[:4], 0, total_us, 0, total_us, volume=0.35, render_idx=0)
+        tracks.append({"id": _cap_uid(), "type": "audio", "segments": [s_seg], "flag": 0, "attribute": 0, "name": "", "is_default_name": True})
+        meta_music.append({"create_time": now_s, "duration": total_us, "extra_info": sfx_path.name, "file_Path": sfx_path.as_posix(), "height": 0, "id": str(uuid.uuid4()), "import_time": now_s, "import_time_ms": now_us, "metetype": "music", "type": 0, "width": 0})
 
     if music_path and music_path.is_file():
         a_mid = _cap_uid()
@@ -1251,9 +1730,9 @@ def _apply_davinci_project(
 
 
 _COLOR_GRADES: dict[str, str] = {
-    "vivid": "eq=contrast=1.10:brightness=0.02:saturation=1.22,unsharp=5:5:0.65:5:5:0.0",
-    "teal_orange": "colorbalance=rs=.06:gs=-.02:bs=-.07:rh=.05:gh=-.01:bh=-.06,eq=contrast=1.12:saturation=1.15,unsharp=5:5:0.60:5:5:0.0",
-    "cinematic_film": "eq=contrast=1.14:brightness=-0.02:saturation=0.92,colorbalance=rs=.03:bs=-.04,unsharp=3:3:0.45:3:3:0.0",
+    "vivid": "vibrance=intensity=0.24,curves=preset=medium_contrast,unsharp=5:5:0.65:5:5:0.0",
+    "teal_orange": "colorbalance=rs=.06:gs=-.02:bs=-.07:rh=.05:gh=-.01:bh=-.06,vibrance=intensity=0.16,curves=preset=medium_contrast,unsharp=5:5:0.60:5:5:0.0",
+    "cinematic_film": "colorbalance=rs=.03:bs=-.04,curves=preset=increase_contrast,hue=s=0.92,unsharp=3:3:0.45:3:3:0.0",
     "neutral": "",
 }
 
@@ -1269,11 +1748,56 @@ _TRANSITION_XFADE: dict[str, str | None] = {
 def _color_filter_expr(color_grade: str, effects: list[str]) -> str:
     grade = _COLOR_GRADES.get(color_grade, "")
     if not grade and ("color_pop" in effects or not effects):
-        grade = "eq=contrast=1.08:saturation=1.18"
+        grade = "vibrance=intensity=0.18,unsharp=5:5:0.50:5:5:0.0"
     parts = [grade] if grade else []
     if "vignette" in effects:
         parts.append("vignette=angle=0.35")
     return ("," + ",".join(parts)) if parts else ""
+
+
+_CODEC_CACHE: dict[str, tuple[str, list[str], str, list[str]]] = {}
+
+
+def _detect_codecs(ffmpeg: str) -> tuple[str, list[str], str, list[str]]:
+    cached = _CODEC_CACHE.get(ffmpeg)
+    if cached is not None:
+        return cached
+    if not Path(ffmpeg).is_file():
+        res = ("libx264", ["-preset", "veryfast", "-crf", "20"], "aac", [])
+        _CODEC_CACHE[ffmpeg] = res
+        return res
+    try:
+        out = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=8, creationflags=CREATE_NO_WINDOW).stdout
+    except Exception:
+        out = ""
+
+    if " libx264 " in out:
+        v_enc, v_opts = "libx264", ["-preset", "veryfast", "-crf", "20"]
+    elif " h264_nvenc " in out:
+        v_enc, v_opts = "h264_nvenc", ["-b:v", "6M"]
+    elif " h264_mf " in out:
+        v_enc, v_opts = "h264_mf", ["-b:v", "6M"]
+    elif " h264_qsv " in out:
+        v_enc, v_opts = "h264_qsv", ["-b:v", "6M"]
+    elif " h264_amf " in out:
+        v_enc, v_opts = "h264_amf", ["-b:v", "6M"]
+    elif " libopenh264 " in out:
+        v_enc, v_opts = "libopenh264", ["-b:v", "6M"]
+    else:
+        v_enc, v_opts = "mpeg4", ["-q:v", "4"]
+
+    if " aac " in out:
+        a_enc, a_opts = "aac", []
+    elif " aac_mf " in out:
+        a_enc, a_opts = "aac_mf", ["-b:a", "192k"]
+    elif " libmp3lame " in out:
+        a_enc, a_opts = "libmp3lame", ["-b:a", "192k"]
+    else:
+        a_enc, a_opts = "mp3_mf", ["-b:a", "192k"]
+
+    res = (v_enc, v_opts, a_enc, a_opts)
+    _CODEC_CACHE[ffmpeg] = res
+    return res
 
 
 def _build_ffmpeg_cmd(
@@ -1288,6 +1812,10 @@ def _build_ffmpeg_cmd(
     *,
     color_grade: str = "vivid",
     transition: str = "smooth",
+    broll_pngs: list[tuple[dict[str, Any], Path]] = (),
+    badge_pngs: list[tuple[dict[str, Any], Path]] = (),
+    sfx_path: Path | None = None,
+    bg_mode: str = "auto",
 ) -> list[str]:
     w, h = size
     total_s = sum(c.duration_s for c in clips)
@@ -1296,34 +1824,83 @@ def _build_ffmpeg_cmd(
     xf_dur = 0.35
     eff_total_s = max(0.5, total_s - (xf_dur * (len(clips) - 1) if use_xfade else 0.0))
 
-    cmd = [ffmpeg, "-y", "-loop", "1", "-t", f"{eff_total_s:.2f}", "-i", str(bg_path)]
+    fullscreen_fill = bg_mode in ("auto", "none") and all(_aspect_matches(c, size) for c in clips)
+    clip_base_idx = 0 if fullscreen_fill else 1
+
+    cmd = [ffmpeg, "-y"]
+    if not fullscreen_fill:
+        cmd += ["-loop", "1", "-t", f"{eff_total_s:.2f}", "-i", str(bg_path)]
     for clip in clips:
         cmd += ["-i", str(clip.path)]
-    for _ph, png in phrase_pngs:
-        cmd += ["-loop", "1", "-t", f"{eff_total_s:.2f}", "-i", str(png)]
+
+    overlay_items: list[tuple[dict[str, Any], Path, bool]] = [
+        *[(item, p, True) for item, p in broll_pngs if p.is_file()],
+        *[(item, p, False) for item, p in badge_pngs if p.is_file()],
+        *[(ph, p, False) for ph, p in phrase_pngs[:28] if p.is_file()],
+    ]
+    overlay_start_idx = clip_base_idx + len(clips)
+    for _item, png, _is_slide in overlay_items:
+        cmd += ["-i", str(png)]
+
+    next_idx = overlay_start_idx + len(overlay_items)
     bgm_idx = None
     if music_path and music_path.is_file():
-        bgm_idx = 1 + len(clips) + len(phrase_pngs)
+        bgm_idx = next_idx
         cmd += ["-i", str(music_path)]
+        next_idx += 1
+    sfx_idx = None
+    if sfx_path and sfx_path.is_file():
+        sfx_idx = next_idx
+        cmd += ["-i", str(sfx_path)]
 
-    filters: list[str] = [f"[0:v]scale={w}:{h},setsar=1[bg]"]
+    filters: list[str] = [] if fullscreen_fill else [f"[0:v]scale={w}:{h},setsar=1[bg]"]
     vid_labels: list[str] = []
     aud_labels: list[str] = []
-    fg_w, fg_h = int(w * 0.92), int(h * 0.92)
+    fg_w, fg_h = (w, h) if fullscreen_fill else (int(w * 0.92), int(h * 0.92))
     grade_fx = _color_filter_expr(color_grade, effects)
+    use_zoom = "zoom_punch" in effects or "ken_burns" in effects or not effects
+
     for idx, clip in enumerate(clips):
         vi = f"[vclip{idx}]"
-        filters.append(
-            f"[{idx + 1}:v]scale={fg_w}:{fg_h}:force_original_aspect_ratio=decrease,"
-            f"pad={fg_w}:{fg_h}:(ow-iw)/2:(oh-ih)/2:color=black@0{grade_fx},"
-            f"fps=30,settb=AVTB,setsar=1{vi}"
-        )
+        ci = clip_base_idx + idx
+        if fullscreen_fill:
+            filters.append(
+                f"[{ci}:v]scale={fg_w}:{fg_h}:force_original_aspect_ratio=increase,"
+                f"crop={fg_w}:{fg_h}{grade_fx},fps=30,settb=AVTB,setsar=1{vi}"
+            )
+        else:
+            filters.append(
+                f"[{ci}:v]scale={fg_w}:{fg_h}:force_original_aspect_ratio=decrease,"
+                f"pad={fg_w}:{fg_h}:(ow-iw)/2:(oh-ih)/2:color=black@0{grade_fx},"
+                f"fps=30,settb=AVTB,setsar=1{vi}"
+            )
         vid_labels.append(vi)
         if clip.has_audio:
-            aud_labels.append(f"[{idx + 1}:a]")
+            aud_labels.append(f"[{ci}:a]")
 
     if len(vid_labels) == 1:
-        filters.append(f"{vid_labels[0]}null[fg]")
+        dur0 = clips[0].duration_s
+        if use_zoom and dur0 >= 4.2:
+            n_cuts = min(7, max(2, int(round(dur0 / 3.2))))
+            seg_len = dur0 / n_cuts
+            split_tags = [f"[sp{i}]" for i in range(n_cuts)]
+            filters.append(f"{vid_labels[0]}split={n_cuts}{''.join(split_tags)}")
+            cut_tags: list[str] = []
+            for i in range(n_cuts):
+                t0 = round(i * seg_len, 2)
+                t1 = round(dur0 if i == n_cuts - 1 else (i + 1) * seg_len, 2)
+                tag = f"[vz{i}]"
+                if i % 2 == 1:
+                    filters.append(
+                        f"{split_tags[i]}trim=start={t0:.2f}:end={t1:.2f},setpts=PTS-STARTPTS,"
+                        f"crop=iw/1.09:ih/1.09,scale={fg_w}:{fg_h},setsar=1{tag}"
+                    )
+                else:
+                    filters.append(f"{split_tags[i]}trim=start={t0:.2f}:end={t1:.2f},setpts=PTS-STARTPTS,setsar=1{tag}")
+                cut_tags.append(tag)
+            filters.append(f"{''.join(cut_tags)}concat=n={n_cuts}:v=1:a=0[fg]")
+        else:
+            filters.append(f"{vid_labels[0]}null[fg]")
     elif use_xfade and xf_name:
         cur_v = vid_labels[0]
         cum = clips[0].duration_s
@@ -1336,14 +1913,19 @@ def _build_ffmpeg_cmd(
     else:
         filters.append(f"{''.join(vid_labels)}concat=n={len(vid_labels)}:v=1:a=0[fg]")
 
-    filters.append("[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1[comp0]")
+    if fullscreen_fill:
+        filters.append("[fg]setsar=1[comp0]")
+    else:
+        filters.append("[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1[comp0]")
+
     prev = "[comp0]"
-    base_txt_idx = 1 + len(clips)
-    for idx, (ph, _png) in enumerate(phrase_pngs):
+    for idx, (item, _png, _is_slide) in enumerate(overlay_items):
         nxt = f"[comp{idx + 1}]"
-        s_t = min(ph["start_s"], max(0.0, eff_total_s - 0.3))
-        e_t = min(eff_total_s, ph["start_s"] + ph["duration_s"])
-        filters.append(f"{prev}[{base_txt_idx + idx}:v]overlay=0:0:enable='between(t,{s_t:.2f},{e_t:.2f})'{nxt}")
+        s_t = max(0.0, min(float(item["start_s"]), max(0.0, eff_total_s - 0.15)))
+        e_t = min(eff_total_s, s_t + max(0.20, float(item["duration_s"])))
+        filters.append(
+            f"{prev}[{overlay_start_idx + idx}:v]overlay=0:0:repeatlast=1:enable='between(t,{s_t:.2f},{e_t:.2f})'{nxt}"
+        )
         prev = nxt
     fade_out_st = max(0.0, eff_total_s - 0.35)
     filters.append(f"{prev}fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out_st:.2f}:d=0.35,format=yuv420p[vout]")
@@ -1363,18 +1945,34 @@ def _build_ffmpeg_cmd(
             filters.append(f"{''.join(aud_labels)}concat=n={len(aud_labels)}:v=0:a=1[aclip]")
 
     a_fade_out = max(0.0, eff_total_s - 0.6)
-    if bgm_idx is not None and has_clip_aud:
-        filters.append(f"[{bgm_idx}:a]atrim=0:{eff_total_s:.2f},volume=0.20,afade=t=in:st=0:d=0.35,afade=t=out:st={a_fade_out:.2f}:d=0.55[abgm]")
-        filters.append("[aclip][abgm]amix=inputs=2:duration=first:dropout_transition=2,afade=t=in:st=0:d=0.20[aout]")
+    mix_inputs: list[str] = []
+    if has_clip_aud:
+        mix_inputs.append("[aclip]")
+    if sfx_idx is not None:
+        filters.append(f"[{sfx_idx}:a]atrim=0:{eff_total_s:.2f},volume=0.26[asfx]")
+        mix_inputs.append("[asfx]")
+    if bgm_idx is not None:
+        bgm_vol = 0.18 if has_clip_aud else 0.32
+        filters.append(
+            f"[{bgm_idx}:a]atrim=0:{eff_total_s:.2f},volume={bgm_vol:.2f},afade=t=in:st=0:d=0.35,afade=t=out:st={a_fade_out:.2f}:d=0.55[abgm]"
+        )
+        mix_inputs.append("[abgm]")
+
+    if len(mix_inputs) >= 2:
+        filters.append(
+            f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2,"
+            f"afade=t=in:st=0:d=0.20,afade=t=out:st={a_fade_out:.2f}:d=0.45[aout]"
+        )
         maps += ["-map", "[aout]"]
-    elif bgm_idx is not None:
-        filters.append(f"[{bgm_idx}:a]atrim=0:{eff_total_s:.2f},volume=0.32,afade=t=in:st=0:d=0.35,afade=t=out:st={a_fade_out:.2f}:d=0.55[aout]")
-        maps += ["-map", "[aout]"]
-    elif has_clip_aud:
-        filters.append(f"[aclip]afade=t=in:st=0:d=0.20,afade=t=out:st={a_fade_out:.2f}:d=0.50[aout]")
+    elif len(mix_inputs) == 1:
+        filters.append(f"{mix_inputs[0]}afade=t=in:st=0:d=0.20,afade=t=out:st={a_fade_out:.2f}:d=0.45[aout]")
         maps += ["-map", "[aout]"]
 
-    cmd += ["-filter_complex", ";".join(filters), *maps, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-shortest", str(out_mp4)]
+    v_enc, v_opts, a_enc, a_opts = _detect_codecs(ffmpeg)
+    cmd += ["-filter_complex", ";".join(filters), *maps, "-c:v", v_enc, *v_opts]
+    if "-map" in maps and "[aout]" in maps:
+        cmd += ["-c:a", a_enc, *a_opts]
+    cmd += ["-shortest", str(out_mp4)]
     return cmd
 
 
@@ -1389,6 +1987,10 @@ def _render_ffmpeg_preview(
     *,
     color_grade: str = "vivid",
     transition: str = "smooth",
+    broll_pngs: list[tuple[dict[str, Any], Path]] = (),
+    badge_pngs: list[tuple[dict[str, Any], Path]] = (),
+    sfx_path: Path | None = None,
+    bg_mode: str = "auto",
 ) -> bool:
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
@@ -1404,9 +2006,15 @@ def _render_ffmpeg_preview(
         effects,
         color_grade=color_grade,
         transition=transition,
+        broll_pngs=broll_pngs,
+        badge_pngs=badge_pngs,
+        sfx_path=sfx_path,
+        bg_mode=bg_mode,
     )
     try:
-        res = subprocess.run(cmd, capture_output=True, timeout=180, creationflags=CREATE_NO_WINDOW)
+        res = subprocess.run(cmd, capture_output=True, timeout=240, creationflags=CREATE_NO_WINDOW)
+        if res.returncode != 0:
+            log.warning("ffmpeg preview render exit=%s: %s", res.returncode, res.stderr.decode("utf-8", errors="replace")[-400:])
         return res.returncode == 0 and out_mp4.is_file()
     except Exception:
         log.debug("ffmpeg preview render failed", exc_info=True)
@@ -1437,6 +2045,9 @@ def _timeline_tracks_payload(
     music_path: Path | None,
     has_bg: bool,
     has_fx: bool,
+    broll_items: list[dict[str, Any]] = (),
+    badge_items: list[dict[str, Any]] = (),
+    has_sfx: bool = False,
 ) -> tuple[list[dict[str, Any]], list[float], float]:
     v1_items: list[dict[str, Any]] = []
     a1_items: list[dict[str, Any]] = []
@@ -1451,11 +2062,13 @@ def _timeline_tracks_payload(
             "keyframes": has_fx,
         })
         if clip.has_audio:
-            a1_items.append({"start": cursor, "end": end, "text": tr("Audio")})
+            a1_items.append({"start": cursor, "end": end, "text": tr("Voce + Audio")})
         if idx > 0:
             transitions.append(cursor)
         cursor = end
     total_s = max(1.0, cursor)
+    if has_sfx:
+        a1_items.append({"start": 0.0, "end": total_s, "text": "SFX · Whoosh & Pop", "color": "#EC4899"})
     if music_path and music_path.is_file():
         a1_items.append({"start": 0.0, "end": total_s, "text": f"♪ {music_path.stem[:18]}", "color": "#2DD4BF"})
 
@@ -1467,10 +2080,18 @@ def _timeline_tracks_payload(
         {"start": ph["start_s"], "end": ph["start_s"] + ph["duration_s"], "text": ph["text"]}
         for ph in phrases if not ph.get("is_hook")
     ]
+    fx_items = [
+        {"start": float(it["start_s"]), "end": float(it["start_s"]) + float(it["duration_s"]), "text": f"3D {it['text']}", "keyframes": True}
+        for it in broll_items
+    ] + [
+        {"start": float(it["start_s"]), "end": float(it["start_s"]) + float(it["duration_s"]), "text": f"★ {it['text']}"}
+        for it in badge_items
+    ]
     bg_items = [{"start": 0.0, "end": total_s, "text": tr("Sfondo dinamico")}] if has_bg else []
     tracks = [
         {"id": "V3", "label": "V3 TITOLI", "items": v3_items},
-        {"id": "V2", "label": "V2 SUBS", "items": v2_items},
+        {"id": "V2", "label": "V2 PAROLE", "items": v2_items},
+        {"id": "FX", "label": "FX B-ROLL", "items": fx_items},
         {"id": "V1", "label": "V1 VIDEO", "items": v1_items},
         {"id": "BG", "label": "BG STUDIO", "items": bg_items},
         {"id": "A1", "label": "A1 AUDIO", "items": a1_items},
@@ -1557,7 +2178,10 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     effects = [str(e) for e in (args.get("effects") or ["zoom_punch", "color_pop", "vignette"])]
     transition = str(args.get("transition") or "smooth")
     color_grade = str(args.get("color_grade") or ("teal_orange" if style == "cinematic" else "vivid"))
+    caption_mode = str(args.get("caption_mode") or "word")
     auto_captions = bool(args.get("auto_captions", True))
+    kinetic_broll = bool(args.get("kinetic_broll", True))
+    sfx_enabled = bool(args.get("sfx", kinetic_broll))
     progress_bar = bool(args.get("progress_bar", True))
     render_preview = bool(args.get("render_preview", True))
     music_arg = str(args.get("music") or "").strip()
@@ -1572,9 +2196,11 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
                 "aspect_ratio": aspect_ratio,
                 "transition": transition,
                 "color_grade": color_grade,
+                "caption_mode": caption_mode,
                 "title": title,
                 "phrases": phrases_raw,
                 "auto_captions": auto_captions,
+                "kinetic_broll": kinetic_broll,
                 "progress_bar": progress_bar,
                 "render_preview": render_preview,
             },
@@ -1592,11 +2218,15 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         size = _RATIOS.get(aspect_ratio, (1080, 1920))
         transition = str(uploaded.get("transition") or transition)
         color_grade = str(uploaded.get("color_grade") or color_grade)
+        caption_mode = str(uploaded.get("caption_mode") or caption_mode)
         title = str(uploaded.get("title") or title)
         phrases_raw = list(uploaded.get("phrases") or phrases_raw)
         music_arg = str(uploaded.get("music") or music_arg)
         if "auto_captions" in uploaded:
             auto_captions = bool(uploaded["auto_captions"])
+        if "kinetic_broll" in uploaded:
+            kinetic_broll = bool(uploaded["kinetic_broll"])
+            sfx_enabled = kinetic_broll
         if "progress_bar" in uploaded:
             progress_bar = bool(uploaded["progress_bar"])
         if "render_preview" in uploaded:
@@ -1628,6 +2258,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     clips = [probe_clip(p) for p in resolved_videos]
     total_s = sum(c.duration_s for c in clips)
     palette = _STYLE_PALETTES.get(style, _STYLE_PALETTES["viral"])
+    fullscreen_fill = bg_mode in ("auto", "none") and all(_aspect_matches(c, size) for c in clips)
 
     project_slug = re.sub(r"[^\w-]+", "_", (args.get("project_name") or title or resolved_videos[0].stem))[:28].strip("_") or "edit"
     project_name = f"Ressy_{project_slug}_{dt.datetime.now():%H%M%S}"
@@ -1669,8 +2300,8 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             "tracks": tracks,
             "preview_path": str(raw_preview) if has_raw else "",
             "preview_label": tr("Sorgente ({w}×{h})").format(w=clips[0].width, h=clips[0].height),
-            "message": tr("Creazione sfondo dinamico & preparazione color grading ({grade})…").format(grade=color_grade),
-            "status_text": tr("Creo sfondo & look…"),
+            "message": tr("Impostazione inquadratura & preparazione color grading ({grade})…").format(grade=color_grade),
+            "status_text": tr("Creo inquadratura & look…"),
         },
     )
 
@@ -1686,6 +2317,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         color_grade=color_grade,
         show_progress_bar=False,
         progress_frac=0.25,
+        fullscreen_fill=fullscreen_fill,
     )
     tracks, transitions, dur_all = _timeline_tracks_payload(clips, [], music_path=music_path, has_bg=True, has_fx=False)
     done_stages.append("assets")
@@ -1695,13 +2327,13 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             "type": "stage",
             "stage": "captions",
             "done_stages": list(done_stages),
-            "progress": 38,
+            "progress": 36,
             "playhead": dur_all * 0.25,
             "tracks": tracks,
             "preview_path": str(stage_grade),
-            "preview_label": tr("Sfondo & color grading ({grade})").format(grade=color_grade),
-            "message": tr("Trascrizione audio & generazione titoli / sottotitoli sincronizzati…"),
-            "status_text": tr("Genero sottotitoli…"),
+            "preview_label": tr("Look & Color grading ({grade})").format(grade=color_grade),
+            "message": tr("Trascrizione audio & sincronizzazione sottotitoli parola per parola…"),
+            "status_text": tr("Sincronizzo parole…"),
         },
     )
 
@@ -1713,6 +2345,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         explicit_phrases=phrases_raw,
         style=style,
         use_stt=auto_captions,
+        caption_mode=caption_mode,
     )
     phrase_pngs: list[tuple[dict[str, Any], Path]] = []
     for idx, ph in enumerate(phrases):
@@ -1723,15 +2356,17 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     _write_srt(srt_path, phrases)
 
     stage_caps = bundle_dir / "preview_captions.png"
+    sample_card = next((p for ph, p in phrase_pngs if not ph.get("is_hook")), phrase_pngs[0][1] if phrase_pngs else None)
     _render_composite_preview(
         stage_caps,
         bg_path,
         raw_preview if has_raw else None,
-        phrase_pngs[0][1] if phrase_pngs else None,
+        sample_card,
         size,
         color_grade=color_grade,
         show_progress_bar=progress_bar,
-        progress_frac=0.52,
+        progress_frac=0.50,
+        fullscreen_fill=fullscreen_fill,
     )
     tracks, transitions, dur_all = _timeline_tracks_payload(clips, phrases, music_path=music_path, has_bg=True, has_fx=False)
     done_stages.append("captions")
@@ -1741,28 +2376,63 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             "type": "stage",
             "stage": "effects",
             "done_stages": list(done_stages),
-            "progress": 56,
-            "playhead": dur_all * 0.5,
+            "progress": 52,
+            "playhead": dur_all * 0.48,
             "tracks": tracks,
             "preview_path": str(stage_caps),
-            "preview_label": tr("Compositing titoli ({n} card)").format(n=len(phrase_pngs)),
-            "message": tr("Applico keyframe zoom, transizioni ({tr}) e auto-ducking audio…").format(tr=transition),
-            "status_text": tr("Applico transizioni & FX…"),
+            "preview_label": tr("Sottotitoli dinamici ({n} card)").format(n=len(phrase_pngs)),
+            "message": tr("Creazione slide 3D Grid B-Roll, badge animati, punch zoom & SFX ({tr})…").format(tr=transition),
+            "status_text": tr("Creo B-Roll 3D & SFX…"),
         },
     )
 
-    tracks, transitions, dur_all = _timeline_tracks_payload(clips, phrases, music_path=music_path, has_bg=True, has_fx=True)
+    broll_items, badge_items = _plan_broll_elements(phrases, total_s, enabled=kinetic_broll)
+    broll_pngs: list[tuple[dict[str, Any], Path]] = []
+    for idx, sl in enumerate(broll_items):
+        s_img = bundle_dir / f"broll_{idx + 1:02d}.png"
+        _render_cutaway_slide(s_img, sl["text"], sl["subtitle"], sl["icon"], size, variant=sl["variant"])
+        broll_pngs.append((sl, s_img))
+    badge_pngs: list[tuple[dict[str, Any], Path]] = []
+    for idx, bg_it in enumerate(badge_items):
+        b_img = bundle_dir / f"badge_{idx + 1:02d}.png"
+        _render_floating_badge(b_img, bg_it["text"], bg_it["icon"], size)
+        badge_pngs.append((bg_it, b_img))
+
+    sfx_path: Path | None = None
+    if sfx_enabled:
+        sfx_events: list[tuple[str, float]] = [("sub", 0.05)]
+        for sl in broll_items:
+            sfx_events.append(("whoosh", max(0.05, float(sl["start_s"]) - 0.14)))
+        for bg_it in badge_items:
+            sfx_events.append(("pop", float(bg_it["start_s"])))
+        sfx_cand = bundle_dir / "sfx_hits.wav"
+        if _synthesize_sfx_wav(sfx_cand, total_s, sfx_events):
+            sfx_path = sfx_cand
+
+    tracks, transitions, dur_all = _timeline_tracks_payload(
+        clips,
+        phrases,
+        music_path=music_path,
+        has_bg=True,
+        has_fx=True,
+        broll_items=broll_items,
+        badge_items=badge_items,
+        has_sfx=sfx_path is not None,
+    )
     done_stages.append("effects")
+    broll_preview = str(broll_pngs[-1][1]) if broll_pngs else str(stage_caps)
     _studio_emit(
         ctx,
         {
             "type": "stage",
             "stage": "timeline",
             "done_stages": list(done_stages),
-            "progress": 70,
-            "playhead": dur_all * 0.7,
+            "progress": 68,
+            "playhead": dur_all * 0.68,
             "tracks": tracks,
             "transitions": transitions,
+            "preview_path": broll_preview,
+            "preview_label": tr("B-Roll 3D & grafiche") if broll_pngs else tr("Timeline FX"),
             "message": tr("Costruisco la timeline completa su {editor}…").format(editor=ed_label),
             "status_text": tr("Esporto timeline {editor}…").format(editor=ed_label),
         },
@@ -1786,6 +2456,10 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             effects,
             color_grade=color_grade,
             transition=transition,
+            broll_pngs=broll_pngs,
+            badge_pngs=badge_pngs,
+            sfx_path=sfx_path,
+            fullscreen_fill=fullscreen_fill,
         )
         done_stages.append("timeline")
         _studio_emit(
@@ -1794,7 +2468,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
                 "type": "stage",
                 "stage": "render",
                 "done_stages": list(done_stages),
-                "progress": 84,
+                "progress": 82,
                 "playhead": dur_all * 0.88,
                 "message": tr("Esportazione MP4 finale & apertura automatica di CapCut…") if render_preview else tr("Apertura progetto in CapCut…"),
                 "status_text": tr("Render video finale…") if render_preview else tr("Apro CapCut…"),
@@ -1812,6 +2486,10 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
                 effects,
                 color_grade=color_grade,
                 transition=transition,
+                broll_pngs=broll_pngs,
+                badge_pngs=badge_pngs,
+                sfx_path=sfx_path,
+                bg_mode=bg_mode,
             ):
                 rendered_mp4 = candidate_mp4
                 final_frame = bundle_dir / "preview_final.jpg"
@@ -1850,7 +2528,9 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
         ).format(project=project_name, clips=len(clips), phrases=len(phrases), path=str(draft_dir), preview=preview_note)
 
     fcpxml_path = _write_fcpxml(bundle_dir / "timeline.fcpxml", project_name, clips, bg_path, phrase_pngs, music_path, size)
-    media_all = [bg_path, *[c.path for c in clips], *[p for _, p in phrase_pngs]]
+    media_all = [bg_path, *[c.path for c in clips], *[p for _, p in phrase_pngs], *[p for _, p in broll_pngs], *[p for _, p in badge_pngs]]
+    if sfx_path:
+        media_all.append(sfx_path)
     if music_path:
         media_all.append(music_path)
     done_stages.append("timeline")
@@ -1860,7 +2540,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             "type": "stage",
             "stage": "render",
             "done_stages": list(done_stages),
-            "progress": 84,
+            "progress": 82,
             "playhead": dur_all * 0.88,
             "message": tr("Invio timeline a DaVinci Resolve & render anteprima…"),
             "status_text": tr("Apro DaVinci Resolve…"),
@@ -1878,6 +2558,10 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
             effects,
             color_grade=color_grade,
             transition=transition,
+            broll_pngs=broll_pngs,
+            badge_pngs=badge_pngs,
+            sfx_path=sfx_path,
+            bg_mode=bg_mode,
         ):
             rendered_mp4 = candidate_mp4
             final_frame = bundle_dir / "preview_final.jpg"
@@ -1929,7 +2613,7 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "edit_video",
-        "Edita video live con Studio su CapCut o DaVinci (sfondi, grading, transizioni, keyframe, testi, MP4). "
+        "Edita video live stile TikTok/Reels con Studio (CapCut/DaVinci, sottotitoli sync, B-Roll 3D, SFX, MP4). "
         "Vuoto apre upload: mai inventare file.",
         params(
             {
@@ -1939,12 +2623,14 @@ TOOLS = [
                 "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"]},
                 "transition": {"type": "string", "enum": ["smooth", "dissolve", "zoom_whip", "flash", "cut"]},
                 "color_grade": {"type": "string", "enum": ["vivid", "teal_orange", "cinematic_film", "neutral"]},
+                "caption_mode": {"type": "string", "enum": ["word", "phrase"]},
                 "title": {"type": "string"},
                 "phrases": {"type": "array", "items": {"type": "string"}},
                 "background": {"type": "string", "enum": ["auto", "blur", "neon_grid", "dark_gradient", "none"]},
                 "effects": {"type": "array", "items": {"type": "string"}},
                 "music": {"type": "string"},
                 "auto_captions": {"type": "boolean"},
+                "kinetic_broll": {"type": "boolean"},
                 "progress_bar": {"type": "boolean"},
                 "render_preview": {"type": "boolean"},
                 "project_name": {"type": "string"},

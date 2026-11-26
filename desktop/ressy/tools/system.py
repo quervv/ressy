@@ -566,7 +566,7 @@ TOOLS = [
     ),
     Tool(
         "take_screenshot",
-        "Screenshot schermo o finestra app.",
+        "Salva/allega foto schermo SOLO se chiesta esplicitamente (mai per leggere app o Discord).",
         params({"app": {"type": "string"}}),
         take_screenshot,
     ),

@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 import httpx
 
-from ..config import CLAUDE_MODELS, PROVIDER_NAMES, Settings
+from ..config import CLAUDE_MODELS, LOCAL_LLM_MODELS, PROVIDER_NAMES, Settings, normalize_custom_url
 from .groq import (
     ChatResult,
     GroqAuthError,
@@ -423,7 +423,86 @@ class ClaudeClient:
         return [m for m in CLAUDE_MODELS if m in available] or list(CLAUDE_MODELS)
 
 
-_CLIENTS = {"groq": GroqClient, "claude": ClaudeClient, "gemini": GeminiClient, "openrouter": OpenRouterClient}
+class CustomServerClient(GroqClient):
+
+    NAME = "Server AI"
+    PROVIDER = "custom"
+    BASE = ""
+
+    def __init__(self, api_key: Callable[[], str], base_url: Callable[[], str] | str = "") -> None:
+        super().__init__(api_key)
+        self._base_url_fn: Callable[[], str] = base_url if callable(base_url) else (lambda v=base_url: str(v or ""))
+        self._client_base = ""
+
+    def _endpoint(self) -> str:
+        url = normalize_custom_url(self._base_url_fn())
+        if not url:
+            raise GroqAuthError(
+                tr("Manca l'URL del tuo server AI: inseriscilo nelle impostazioni di Ressy."),
+                status=401,
+                provider=self.NAME,
+            )
+        return url
+
+    def _http(self) -> httpx.AsyncClient:
+        url = self._endpoint()
+        if self._client is None or self._client.is_closed or self._client_base != url:
+            self._client_base = url
+            self._client = httpx.AsyncClient(
+                base_url=url,
+                timeout=httpx.Timeout(120.0, connect=10.0),
+                headers={"User-Agent": f"Ressy/{__version__ if '__version__' in globals() else '1.3.2'} (+https://ressy.top)"},
+            )
+        return self._client
+
+    def params_for(self, model: str) -> dict[str, Any]:
+        return {}
+
+    def _auth(self, key: str | None = None) -> dict[str, str]:
+        raw = (key if key is not None else self._api_key() or "").strip()
+        return {"Authorization": f"Bearer {raw}"} if raw else {}
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        models: list[str] | tuple[str, ...],
+        **kwargs: Any,
+    ) -> ChatResult:
+        self._endpoint()
+        chosen = [m for m in models if m and m != "auto"]
+        if not chosen:
+            try:
+                discovered = await self.list_models()
+                chosen = discovered[:3]
+            except GroqError:
+                chosen = []
+        if not chosen:
+            chosen = ["default"]
+        return await super().chat(messages, models=chosen, **kwargs)
+
+    async def list_models(self, key: str | None = None) -> list[str]:
+        self._endpoint()
+        response = await self._request("GET", "/models", headers=self._auth(key))
+        body = response.json()
+        raw = body.get("data") or body.get("models") or []
+        ids: list[str] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            mid = item.get("id") or item.get("name") or item.get("model")
+            if mid and item.get("active", True):
+                ids.append(str(mid))
+        return sorted(dict.fromkeys(ids))
+
+
+_CLIENTS = {
+    "groq": GroqClient,
+    "claude": ClaudeClient,
+    "gemini": GeminiClient,
+    "openrouter": OpenRouterClient,
+    "custom": CustomServerClient,
+}
 _KEYLESS = ("local",)
 
 
@@ -441,6 +520,7 @@ class LLMRouter:
         self.claude = ClaudeClient(lambda: settings.anthropic_api_key)
         self.gemini = GeminiClient(lambda: settings.gemini_api_key)
         self.openrouter = OpenRouterClient(lambda: settings.openrouter_api_key)
+        self.custom = CustomServerClient(lambda: settings.custom_api_key, lambda: settings.custom_base_url)
         from .local_llm import LocalLLMClient
 
         self.local = LocalLLMClient(lambda: settings.local_llm_model, lambda: settings.user_name)
@@ -449,11 +529,17 @@ class LLMRouter:
         self.last_provider = ""
 
     def _all(self) -> tuple[Any, ...]:
-        return (self.groq, self.claude, self.gemini, self.openrouter, self.local)
+        return (self.groq, self.claude, self.gemini, self.openrouter, self.custom, self.local)
 
     def client(self, provider: str | None = None):
-        return {"groq": self.groq, "claude": self.claude, "gemini": self.gemini, "openrouter": self.openrouter,
-                "local": self.local}[provider or self.settings.llm_provider]
+        return {
+            "groq": self.groq,
+            "claude": self.claude,
+            "gemini": self.gemini,
+            "openrouter": self.openrouter,
+            "custom": self.custom,
+            "local": self.local,
+        }[provider or self.settings.llm_provider]
 
     @property
     def name(self) -> str:
@@ -468,6 +554,8 @@ class LLMRouter:
             return list(dict.fromkeys(m for m in ordered if m))
         if provider == "openrouter":
             return [self.settings.openrouter_model] if self.settings.openrouter_model else ["auto"]
+        if provider == "custom":
+            return [self.settings.custom_model] if self.settings.custom_model else ["auto"]
         if provider == "local":
             return [self.settings.local_llm_model]
         return self.settings.llm_models()
@@ -485,7 +573,13 @@ class LLMRouter:
         chain = self.chain()
         last: GroqError | None = None
         for index, provider in enumerate(chain):
-            models = requested if (index == 0 and requested) else self.models(provider)
+            use_requested = (
+                index == 0
+                and requested
+                and provider == self.settings.llm_provider
+                and not (provider != "local" and any(m in LOCAL_LLM_MODELS for m in requested))
+            )
+            models = requested if use_requested else self.models(provider)
             try:
                 result = await self.client(provider).chat(messages, models=models, **kwargs)
             except GroqAuthError as exc:
@@ -522,7 +616,7 @@ class LLMRouter:
     async def web_answer(self, question: str, *, language: str = "it") -> str:
         last: Exception | None = None
         for provider in self.chain():
-            if provider == "local":
+            if provider in ("local", "custom"):
                 continue
             try:
                 if provider == "claude":
@@ -562,16 +656,18 @@ class LLMRouter:
                 log.debug("close failed", exc_info=True)
 
 
-def make_client(provider: str, key: str = ""):
+def make_client(provider: str, key: str = "", base_url: str = ""):
+    if provider == "custom":
+        return CustomServerClient(lambda: key, lambda: base_url)
     cls = _CLIENTS[provider]
     return cls(lambda: key)
 
 
-def verify_key_blocking(provider: str, key: str) -> list[str]:
+def verify_key_blocking(provider: str, key: str, base_url: str = "") -> list[str]:
     import asyncio
 
     async def go() -> list[str]:
-        client = make_client(provider, key)
+        client = make_client(provider, key, base_url=base_url)
         try:
             return await client.list_models(key)
         finally:

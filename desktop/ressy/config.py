@@ -18,9 +18,10 @@ log = logging.getLogger("ressy.config")
 
 LEGACY_SERVER_URL = "wss://ressy.top/ws/agent"
 DEFAULT_SERVER_PORT = 8765
+DEFAULT_MODEL_SERVER_PORT = 8088
 REMOTE_MODES = ("local", "server")
 DEFAULT_LLM_MODEL = "openai/gpt-oss-120b"
-LLM_FALLBACK_MODELS = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile")
+LLM_FALLBACK_MODELS = ("openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b")
 DEFAULT_STT_MODEL = "whisper-large-v3"
 OLD_STT_DEFAULT = "whisper-large-v3-turbo"
 
@@ -61,8 +62,34 @@ def wake_phrases_for(language: str, phrases: list[str]) -> list[str]:
     own = [p for p in phrases if p not in other and p not in WAKE_DEFAULTS[code]]
     return list(WAKE_DEFAULTS[code]) + own
 
-LLM_PROVIDERS = ("groq", "gemini", "openrouter", "claude", "local")
-PROVIDER_NAMES = {"groq": "Groq", "claude": "Claude", "gemini": "Gemini", "openrouter": "OpenRouter", "local": tr("Sul PC")}
+LLM_PROVIDERS = ("groq", "gemini", "openrouter", "claude", "local", "custom")
+PROVIDER_NAMES = {
+    "groq": "Groq",
+    "claude": "Claude",
+    "gemini": "Gemini",
+    "openrouter": "OpenRouter",
+    "local": tr("Sul PC"),
+    "custom": tr("Il tuo server AI"),
+}
+
+
+def normalize_custom_url(url: str) -> str:
+    raw = (url or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    from urllib.parse import urlparse
+
+    parsed = urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = "/v1"
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+
 CLAUDE_MODELS = {
     "claude-opus-5-5": tr("Claude Opus 5.5 (il più capace)"),
     "claude-sonnet-5-5": "Claude Sonnet 5.5 (veloce e capace)",
@@ -89,7 +116,7 @@ LOCAL_LLM_MODELS = {
 }
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5-1.5b"
 
-_SECRET_FIELDS = ("groq_api_key", "anthropic_api_key", "gemini_api_key", "openrouter_api_key", "agent_secret", "telegram_token", "discord_token")
+_SECRET_FIELDS = ("groq_api_key", "anthropic_api_key", "gemini_api_key", "openrouter_api_key", "custom_api_key", "agent_secret", "telegram_token", "discord_token")
 
 
 @dataclass
@@ -106,6 +133,9 @@ class Settings:
     gemini_model: str = DEFAULT_GEMINI_MODEL
     openrouter_api_key: str = ""
     openrouter_model: str = ""
+    custom_base_url: str = ""
+    custom_model: str = ""
+    custom_api_key: str = ""
     llm_fallback: bool = True
     local_llm_model: str = ""
     quick_commands: bool = True
@@ -245,6 +275,9 @@ class Settings:
                                  "gemini-2.5-pro": "gemini-pro-latest"}.get(self.gemini_model, DEFAULT_GEMINI_MODEL)
         self.openrouter_api_key = (self.openrouter_api_key or "").strip()
         self.openrouter_model = (self.openrouter_model or "").strip()
+        self.custom_base_url = normalize_custom_url(self.custom_base_url)
+        self.custom_model = (self.custom_model or "").strip()
+        self.custom_api_key = (self.custom_api_key or "").strip()
         if self.local_llm_model not in LOCAL_LLM_MODELS:
             self.local_llm_model = ""
         if self.llm_provider == "local" and not self.local_llm_model:
@@ -297,6 +330,7 @@ class Settings:
             "claude": self.anthropic_api_key,
             "gemini": self.gemini_api_key,
             "openrouter": self.openrouter_api_key,
+            "custom": self.custom_api_key,
         }.get(provider, "").strip()
 
     def local_llm_ready(self) -> bool:
@@ -308,7 +342,17 @@ class Settings:
 
     def providers_with_keys(self) -> list[str]:
         order = [self.llm_provider, *(p for p in LLM_PROVIDERS if p != self.llm_provider)]
-        return [p for p in order if (self.local_llm_ready() if p == "local" else self.provider_key(p))]
+        out: list[str] = []
+        for p in order:
+            if p == "local":
+                if self.local_llm_ready():
+                    out.append(p)
+            elif p == "custom":
+                if bool(normalize_custom_url(self.custom_base_url)):
+                    out.append(p)
+            elif self.provider_key(p):
+                out.append(p)
+        return out
 
     @property
     def speech_engine(self) -> str:
@@ -325,6 +369,9 @@ class Settings:
         if self.llm_provider == "local":
             if not self.local_llm_ready():
                 return tr("Scarica il modello AI sul PC (Impostazioni › Intelligenza) o inserisci una chiave API.")
+        elif self.llm_provider == "custom":
+            if not normalize_custom_url(self.custom_base_url):
+                return tr("Inserisci l'URL del tuo server AI (Impostazioni › Intelligenza) o avviane uno sul PC.")
         elif not self.provider_key(self.llm_provider):
             return tr("Per usare Ressy inserisci la chiave API di {value} (Impostazioni › Intelligenza).").format(value=PROVIDER_NAMES[self.llm_provider])
         engine = self.speech_engine

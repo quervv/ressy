@@ -12,7 +12,7 @@ from ..speech.wake import phonetic
 from . import platform_os, screen, winapi
 from .apps import launch
 from ..paths import app_dir
-from .registry import Tool, ToolContext, ToolError, params
+from .registry import NeedsInputError, Tool, ToolContext, ToolError, params
 from ..i18n import tr
 
 MAX_CONTACTS = 30
@@ -109,7 +109,7 @@ def _launch_discord(ctx: ToolContext) -> None:
         if entry is not None and "discord" in entry.norm:
             launch(entry)
             return
-    raise ToolError(tr("Discord non sembra installato su questo PC."))
+    raise NeedsInputError(tr("Discord non sembra installato su questo PC."))
 
 
 def _wait_main_window(timeout: float) -> winapi.Window | None:
@@ -151,7 +151,8 @@ def chat_confirmed(title_before: str, title_after: str, recipient: str, kind: st
     if chat.startswith(marker):
         head = chat[1:].split(" | ")[0]
         return _names_match(head, recipient)
-    return title_after != title_before and _names_match(chat, recipient)
+    head = chat.split(" | ")[0]
+    return _names_match(head, recipient) or (title_after != title_before and _names_match(chat, recipient))
 
 
 def _overlay_region(hwnd: int) -> tuple[int, int, int, int]:
@@ -179,8 +180,15 @@ def _read(region: tuple[int, int, int, int]) -> list[screen.Line]:
     return lines
 
 
+_TARGET_WRAPPER = re.compile(
+    r"^(?:(?:il|la|lo|l'|un|una)\s+)?(?:canale|gruppo|server|chat(?:\s+(?:di|con))?|utente|amico|stanza)\s+",
+    re.IGNORECASE,
+)
+
+
 def _clean_name(text: str) -> str:
-    return text.strip().lstrip("@#").strip()
+    cleaned = text.strip().lstrip("@#").strip()
+    return _TARGET_WRAPPER.sub("", cleaned).strip()
 
 
 def _result_rows(lines: list[screen.Line], query_text: str) -> list[screen.Line] | None:
@@ -272,6 +280,10 @@ def _clear_switcher() -> None:
 def _queries(recipient: str, kind: str) -> list[str]:
     marker = "#" if kind == "channel" else "@"
     out = [marker + recipient, recipient]
+    low = recipient.lower()
+    if low.startswith("vocale ") and len(recipient) > 7:
+        short = recipient[7:].strip()
+        out.extend([marker + short, short])
     words = recipient.split()
     if len(words) > 1:
         out.append(max(words, key=len))
@@ -279,7 +291,7 @@ def _queries(recipient: str, kind: str) -> list[str]:
     return [q for q in out if not (q.lower() in seen or seen.add(q.lower()))]
 
 
-class _Stuck(ToolError):
+class _Stuck(NeedsInputError):
     pass
 
 
@@ -420,13 +432,13 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
     if kind != "current" and (not recipient or means_current_chat(recipient)):
         kind = "current" if recipient else kind
     if kind != "current" and not recipient:
-        raise ToolError(tr("A chi devo scrivere?"))
+        raise NeedsInputError(tr("A chi devo scrivere su Discord?"))
     if kind == "user":
         recipient = known_name(recipient)
     if not message:
-        raise ToolError(tr("Il messaggio è vuoto."))
+        raise NeedsInputError(tr("Il messaggio è vuoto."))
     if len(message) > MAX_LENGTH:
-        raise ToolError(tr("Il messaggio è troppo lungo per Discord ({len} caratteri, massimo {MAX_LENGTH}).").format(len=len(message), MAX_LENGTH=MAX_LENGTH))
+        raise NeedsInputError(tr("Il messaggio è troppo lungo per Discord ({len} caratteri, massimo {MAX_LENGTH}).").format(len=len(message), MAX_LENGTH=MAX_LENGTH))
 
     window = _ensure_discord_ready(ctx)
 
@@ -517,7 +529,7 @@ def read_discord_chat(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "send_discord_message",
-        "Invia messaggio Discord a amico, canale o chat aperta (kind=current). Apre Discord da solo.",
+        "Invia messaggio Discord a persona, canale o chat aperta (kind=current). PASSA SEMPRE recipient (tranne kind=current) e message. Non usare screenshot.",
         params(
             {
                 "recipient": {"type": "string", "description": "amico/canale (vuoto se current)"},

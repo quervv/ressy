@@ -30,6 +30,11 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="registri dettagliati")
     parser.add_argument("--server", action="store_true", help="avvia il server del tuo bot (self-host), senza finestre")
     parser.add_argument("--server-stop", action="store_true", help="ferma il server del bot")
+    parser.add_argument("--model-server", action="store_true", help="avvia il server API OpenAI-compatibile del modello AI")
+    parser.add_argument("--model-file", default="", help="percorso file .gguf per --model-server")
+    parser.add_argument("--model-host", default="0.0.0.0", help="host di ascolto per --model-server (default 0.0.0.0)")
+    parser.add_argument("--model-port", type=int, default=8088, help="porta HTTP per --model-server (default 8088)")
+    parser.add_argument("--model-key", default="", help="token/chiave Bearer opzionale per --model-server")
     parser.add_argument("--uninstall", action="store_true", help="disinstalla Ressy")
     parser.add_argument("--quiet", action="store_true", help="con --uninstall: senza domande")
     parser.add_argument("--after", type=int, default=0, help=argparse.SUPPRESS)
@@ -74,6 +79,15 @@ def main(argv: list[str] | None = None) -> int:
         from .install import stop_server
 
         return 0 if stop_server() else 1
+    if args.model_server:
+        from .brain.model_server import run_cli_model_server
+
+        return run_cli_model_server(
+            args.model_file,
+            host=args.model_host,
+            port=args.model_port,
+            api_key=args.model_key,
+        )
     if sys.platform == "win32":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
@@ -221,6 +235,16 @@ def main(argv: list[str] | None = None) -> int:
 
     controller.start()
     app.aboutToQuit.connect(controller.shutdown)
+
+    def _stop_custom_server() -> None:
+        try:
+            from .brain.model_server import shared_runner
+
+            shared_runner().stop()
+        except Exception:
+            pass
+
+    app.aboutToQuit.connect(_stop_custom_server)
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     heartbeat = QTimer()

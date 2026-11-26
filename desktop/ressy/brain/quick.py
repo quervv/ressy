@@ -107,23 +107,35 @@ _CREATE_FOLDER = re.compile(
     r"^(?:crea|creami|fai|fammi)\s+(?:una |la )?cartella\s+(?:chiamata\s+)?(.+?)(?:\s+(?:su|sul|in|nei|nel)\s+(desktop|scrivania|documenti|download))?$"
 )
 
-_DISCORD_QUOTED = re.compile(
-    r"^(?:su discord\s+)?(?:manda|invia|scrivi)(?:\s+su discord)?\s+a\s+([^\s:]{1,40}(?:\s+[^\s:]{1,30})?)\s+"
-    r"(?:su discord\s+)?(?:il messaggio\s+)?[\"«“](.+?)[\"»”]$"
-)
-_DISCORD_COLON = re.compile(
-    r"^(?:su discord\s+)?(?:manda|invia|scrivi)(?:\s+su discord)?\s+a\s+([^:]{1,50}?)\s*:\s*(.+)$"
-)
-_DISCORD_CHE = re.compile(
-    r"^(?:su discord\s+(?:manda|invia|scrivi|di'|dici)|(?:manda|invia|scrivi|di'|dici)\s+su discord)\s+"
-    r"(?:un messaggio\s+)?a\s+([^\s].{0,40}?)\s+che\s+(.+)$"
-)
 _DISCORD_GREETING = frozenset({
     "ciao", "ehi", "hey", "salve", "buongiorno", "buonasera", "buonanotte", "eccomi", "arrivo", "ok", "okay",
-    "si", "no", "fatto", "pronto", "ci sono", "sto arrivando", "come stai", "come va", "tutto bene",
+    "si", "no", "fatto", "pronto", "ci sono", "sto arrivando", "come stai", "come va", "tutto bene", "grazie",
 })
+_DISCORD_GREETING_HEAD = frozenset({
+    "ciao", "ehi", "hey", "salve", "buongiorno", "buonasera", "buonanotte", "eccomi", "arrivo", "ok", "okay",
+    "grazie", "scusa", "ci", "sto", "vieni", "andiamo", "pronto", "bro", "fra", "zi",
+})
+_DISCORD_QUOTED = re.compile(
+    r"^(?:su discord\s+)?(?:manda|invia|scrivi)(?:\s+un messaggio)?(?:\s+su discord)?\s+"
+    r"(?:(?:a|in|nel|sul|su)\s+)?(.+?)(?:\s+su discord)?\s+(?:il messaggio\s+)?[\"«“](.+?)[\"»”]$"
+)
+_DISCORD_COLON = re.compile(
+    r"^(?:su discord\s+)?(?:manda|invia|scrivi)(?:\s+un messaggio)?(?:\s+su discord)?\s+"
+    r"(?:(?:a|in|nel|sul|su)\s+)?(.+?)(?:\s+su discord)?\s*:\s*(.+)$"
+)
+_DISCORD_CHE = re.compile(
+    r"^(?:su discord\s+(?:manda|invia|scrivi|di'|dici)|(?:manda|invia|scrivi|di'|dici)\s+(?:un messaggio\s+)?(?:su discord\s+)?|"
+    r"(?:manda|invia|scrivi|di'|dici)\s+(?:un messaggio\s+)?(?:(?:a|in|nel|sul|su)\s+.+?\s+su discord))"
+)
+_DISCORD_AFTER_TAG = re.compile(
+    r"^(?:manda|invia|scrivi)(?:\s+un messaggio)?\s+(?:a|in|nel|sul|su)\s+(.+?)\s+su discord(?:\s+(?:che\s+)?(.+))?$"
+)
+_DISCORD_CHE_MAIN = re.compile(
+    r"^(?:su discord\s+)?(?:manda|invia|scrivi|di'|dici)(?:\s+su discord)?(?:\s+un messaggio)?(?:\s+su discord)?\s+"
+    r"(?:a|in|nel|sul|su)\s+([^\s].{0,45}?)(?:\s+su discord)?\s+che\s+(?:dice\s+)?(.+)$"
+)
 _DISCORD_DIRECT = re.compile(
-    r"^(?:su discord\s+(?:manda|invia|scrivi)|(?:manda|invia|scrivi)\s+su discord)\s+(?:un messaggio\s+)?a\s+([^\s]{1,35})\s+(.+)$"
+    r"^(?:su discord\s+)?(?:manda|invia|scrivi)(?:\s+su discord)?(?:\s+un messaggio)?(?:\s+su discord)?\s+(?:a|in|nel|sul|su)\s+([^\s]{1,35})\s+(.+)$"
 )
 _DISCORD_CURRENT = re.compile(
     r"^(?:su discord\s+)?(?:scrivi|manda|invia)(?:\s+su discord)?\s+(?:qui|nella chat aperta|in questa chat)(?:\s+su discord)?\s*:?\s+(.+)$"
@@ -131,7 +143,67 @@ _DISCORD_CURRENT = re.compile(
 _DISCORD_READ = re.compile(
     r"^leggi\s+(?:i messaggi\s+(?:di|da|su)\s+)?discord(?:\s+(?:di|con)\s+(.+))?$"
 )
+_CHANNEL_HINT = re.compile(r"^(?:(?:il|lo|la|l')\s+)?(?:canale|gruppo|server|stanza)\s+(.+)$", re.IGNORECASE)
 _PRONOUN_AMBIGUOUS = re.compile(r"^che\s+.*\b(lo|la|li|le|gli|glielo|gliela)\b")
+
+
+def _discord_target(raw: str, candidate: str) -> tuple[str, str]:
+    c = re.sub(r"\s+su discord$", "", candidate.strip(), flags=re.IGNORECASE).strip()
+    kind = "user"
+    m = _CHANNEL_HINT.match(c)
+    if m:
+        kind = "channel"
+        c = m.group(1).strip()
+    return _preserve_case(raw, c), kind
+
+
+def _match_discord(raw: str, t: str, t_no_colon: str) -> Quick | None:
+    if "discord" not in t:
+        return None
+    dcur = _DISCORD_CURRENT.match(t)
+    if dcur and dcur.group(1).strip():
+        return Quick("send_discord_message", {"message": _as_said(raw, dcur.group(1).strip()), "kind": "current"})
+    dq = _DISCORD_QUOTED.match(fix_spoken_text(raw.casefold()))
+    if dq:
+        who, kind = _discord_target(raw, dq.group(1))
+        msg = _preserve_case(raw, dq.group(2).strip())
+        if who and msg:
+            return Quick("send_discord_message", {"recipient": who, "message": msg, "kind": kind})
+    dc = _DISCORD_COLON.match(t)
+    if dc:
+        raw_who = dc.group(1).strip()
+        msg = _as_said(raw, dc.group(2).strip())
+        if raw_who.startswith(("qui", "nella chat", "in questa")):
+            return Quick("send_discord_message", {"message": msg, "kind": "current"}) if msg else None
+        who, kind = _discord_target(raw, raw_who)
+        if who and msg:
+            return Quick("send_discord_message", {"recipient": who, "message": msg, "kind": kind})
+    da = _DISCORD_AFTER_TAG.match(t_no_colon)
+    if da:
+        who, kind = _discord_target(raw, da.group(1))
+        msg_raw = (da.group(2) or "").strip()
+        if who and msg_raw and not _PRONOUN_AMBIGUOUS.match("che " + msg_raw):
+            return Quick("send_discord_message", {"recipient": who, "message": _as_said(raw, msg_raw), "kind": kind})
+    dche = _DISCORD_CHE_MAIN.match(t_no_colon)
+    if dche:
+        who_raw = dche.group(1).strip()
+        msg = dche.group(2).strip()
+        if who_raw and msg and not _PRONOUN_AMBIGUOUS.match("che " + msg) and len(who_raw.split()) <= 3:
+            who, kind = _discord_target(raw, who_raw)
+            return Quick("send_discord_message", {"recipient": who, "message": _as_said(raw, msg), "kind": kind})
+    dd = _DISCORD_DIRECT.match(t_no_colon)
+    if dd:
+        who_raw = dd.group(1).strip()
+        msg_raw = dd.group(2).strip()
+        first_msg_word = (msg_raw.split() or [""])[0]
+        if who_raw and (msg_raw in _DISCORD_GREETING or first_msg_word in _DISCORD_GREETING_HEAD):
+            who, kind = _discord_target(raw, who_raw)
+            return Quick("send_discord_message", {"recipient": who, "message": _as_said(raw, msg_raw), "kind": kind})
+    dr = _DISCORD_READ.fullmatch(t_no_colon)
+    if dr:
+        who = _preserve_case(raw, dr.group(1).strip()) if dr.group(1) else ""
+        return Quick("read_discord_chat", {"recipient": who, "kind": "user" if who else "current"})
+    return None
 
 _WIN_MIN_ALL = re.compile(r"^(?:mostra (?:il )?desktop|minimizza tutto|abbassa tutto|riduci tutto a icona)$")
 _WIN_ACT = re.compile(
@@ -273,39 +345,9 @@ def match(text: str) -> Quick | None:
         ed = "davinci" if "davinci" in raw_ed else ("capcut" if "capcut" in raw_ed else "auto")
         return Quick("edit_video", {"editor": ed})
 
-    dq = _DISCORD_QUOTED.match(fix_spoken_text(raw.casefold()))
-    if dq:
-        who = _preserve_case(raw, dq.group(1).strip())
-        msg = _preserve_case(raw, dq.group(2).strip())
-        if who and msg:
-            return Quick("send_discord_message", {"recipient": who, "message": msg, "kind": "user"})
-    dc = _DISCORD_COLON.match(t)
-    if dc:
-        who = _preserve_case(raw, dc.group(1).strip())
-        msg = _as_said(raw, dc.group(2).strip())
-        if who and msg and not dc.group(1).strip().startswith(("qui", "nella chat", "in questa")):
-            return Quick("send_discord_message", {"recipient": who, "message": msg, "kind": "user"})
-    dcur = _DISCORD_CURRENT.match(t)
-    if dcur and dcur.group(1).strip():
-        return Quick("send_discord_message", {"message": _as_said(raw, dcur.group(1).strip()), "kind": "current"})
-    dche = _DISCORD_CHE.match(t_no_colon)
-    if dche:
-        who = dche.group(1).strip()
-        msg = dche.group(2).strip()
-        if who and msg and not _PRONOUN_AMBIGUOUS.match("che " + msg) and len(who.split()) <= 3:
-            return Quick("send_discord_message", {"recipient": _preserve_case(raw, who),
-                                                  "message": _as_said(raw, msg), "kind": "user"})
-    dd = _DISCORD_DIRECT.match(t_no_colon)
-    if dd:
-        who = dd.group(1).strip()
-        msg_raw = dd.group(2).strip()
-        if who and msg_raw in _DISCORD_GREETING:
-            return Quick("send_discord_message", {"recipient": _preserve_case(raw, who),
-                                                  "message": _as_said(raw, msg_raw), "kind": "user"})
-    dr = _DISCORD_READ.fullmatch(t_no_colon)
-    if dr:
-        who = _preserve_case(raw, dr.group(1).strip()) if dr.group(1) else ""
-        return Quick("read_discord_chat", {"recipient": who, "kind": "user" if who else "current"})
+    discord_q = _match_discord(raw, t, t_no_colon)
+    if discord_q is not None:
+        return discord_q
 
     spoken_site = _SPOKEN_SITE.match(t_no_colon)
     if spoken_site:

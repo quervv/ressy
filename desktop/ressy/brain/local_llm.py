@@ -108,6 +108,15 @@ _MAX_HISTORY = 2
 _LOCAL_CONTINUE_LOOKING = frozenset({
     "list_windows", "read_screen", "list_folder", "read_file", "find_files", "read_webpage", "read_discord_chat", "clipboard",
 })
+_SCREENSHOT_ASK = re.compile(
+    r"\b(?:screenshot|screen\s*shot|schermata|fotograf\w*|cattura\w*|mostra\w*\s+(?:lo\s+)?schermo|"
+    r"vedi\s+(?:cosa|lo)\s+schermo|guarda\s+(?:lo\s+)?schermo|show\s+(?:me\s+)?(?:the\s+)?screen)\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_screenshot(text: str) -> bool:
+    return bool(_SCREENSHOT_ASK.search(text or ""))
 _LOCAL_PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder", "window_action"})
 _LOCAL_OPEN_ONLY = re.compile(
     r"^\W*(?:apri\w*|avvia\w*|lancia\w*|esegui\w*|vai\b|porta\w*|passa\b|torna\b|minimizz\w*|massimizz\w*|"
@@ -288,6 +297,11 @@ _EXAMPLES = (
         "argomenti": {"recipient": "Marco", "message": "ciao", "kind": "user"},
         "risposta": "",
     }),
+    ("scrivi su discord nel canale generale arrivo", {
+        "azione": "send_discord_message",
+        "argomenti": {"recipient": "generale", "message": "arrivo", "kind": "channel"},
+        "risposta": "",
+    }),
     ("edita un video", {"azione": "edit_video", "argomenti": {"editor": "auto"}, "risposta": ""}),
     ("metti lofi su youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
     ("crea il file lista.txt con pane e latte", {
@@ -331,7 +345,8 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
             f"You are Ressy, the voice assistant on {whose} PC. Answer ONLY the current user request.\n"
             "Use the tools below to accomplish ANYTHING requested (apps, find_files, web_answer, download_file, "
             "run_python, run_powershell, UI, edit_video), or choose \"rispondi\" only for chatting/questions. "
-            "Never say «I can't» and never invent file paths (for edit_video without user files, omit files).\n\n"
+            "Never say «I can't» and never invent file paths (for edit_video without user files, omit files). "
+            "Never call take_screenshot unless explicitly asked for a screenshot.\n\n"
             f"Tools:\n{lines}\n\nExamples:\n{examples}"
         )
     who = f" di {user_name}" if user_name else ""
@@ -343,7 +358,8 @@ def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | N
         f"Sei Ressy, l'assistente personale sul PC{who}. Rispondi SOLO all'ultima richiesta attuale dell'utente.\n"
         "Usa gli strumenti qui sotto per fare QUALSIASI cosa richiesta (app, find_files, web_answer, download_file, "
         "run_python, run_powershell, UI, edit_video), oppure scegli \"rispondi\" solo per parlare. "
-        "Non dire mai «non posso» e non inventare nomi di file (per edit_video senza file reali non mettere files).\n\n"
+        "Non dire mai «non posso», non inventare nomi di file (per edit_video senza file reali non mettere files) e "
+        "non usare take_screenshot se non richiesto esplicitamente.\n\n"
         f"Strumenti:\n{lines}\n\nEsempi:\n{examples}"
     )
 
@@ -453,6 +469,7 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
     parts = []
     tool_names: list[str] = []
     all_ok = True
+    needs_input_msg = ""
     for message in reversed(messages):
         if message.get("role") != "tool":
             break
@@ -465,9 +482,14 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
         ok = bool(result.get("ok"))
         if not ok:
             all_ok = False
+            if result.get("needs_input") and not needs_input_msg:
+                needs_input_msg = str(result.get("errore") or "").strip()
         text = str(result.get("esito") or "") if ok else \
             tr("Non ci sono riuscita: ") + str(result.get("errore") or tr("errore sconosciuto"))
         parts.append(text.strip())
+
+    if needs_input_msg:
+        return needs_input_msg
 
     tool_count_in_turn = 0
     for message in reversed(messages):
@@ -480,7 +502,8 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
         return None
 
     if all_ok and tool_names:
-        if all(n in _LOCAL_CONTINUE_LOOKING for n in tool_names):
+        looking = _LOCAL_CONTINUE_LOOKING if _wants_screenshot(order_text) else (_LOCAL_CONTINUE_LOOKING | {"take_screenshot"})
+        if all(n in looking for n in tool_names):
             return None
         if all(n in _LOCAL_PREPARING for n in tool_names) and (
             not _LOCAL_OPEN_ONLY.match(order_text) or _LOCAL_MORE_VERBS.search(order_text)
@@ -507,21 +530,40 @@ def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> di
     calls = message.get("tool_calls")
     if not calls or not messages or messages[-1].get("role") != "tool":
         return message
-    previous = next((m for m in reversed(messages) if m.get("role") == "assistant"), {})
-    prev_call = ((previous.get("tool_calls") or [{}])[0].get("function") or {})
     cur_call = (calls[0].get("function") or {})
     cur_name = cur_call.get("name")
-    if prev_call.get("name") != cur_name:
-        return message
+    cur_args = _norm_call_args(cur_call)
     try:
-        result = json.loads(messages[-1].get("content") or "{}")
+        last_result = json.loads(messages[-1].get("content") or "{}")
     except ValueError:
-        result = {}
-    prev_ok = bool(result.get("ok"))
-    same_args = _norm_call_args(prev_call) == _norm_call_args(cur_call)
-    if not same_args and (not prev_ok or cur_name in _MULTI_ARG_TOOLS):
-        return message
-    return {"role": "assistant", "content": str(result.get("esito") or result.get("errore") or "Fatto.")}
+        last_result = {}
+
+    non_system = [m for m in messages if m.get("role") != "system"]
+    last_user_idx = max((i for i, m in enumerate(non_system) if m.get("role") == "user"), default=0)
+    turn_msgs = non_system[last_user_idx:]
+
+    prior_calls: list[tuple[str, str, dict[str, Any]]] = []
+    for idx, msg in enumerate(turn_msgs):
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                res_obj: dict[str, Any] = {}
+                for nxt in turn_msgs[idx + 1:]:
+                    if nxt.get("role") == "tool" and nxt.get("tool_call_id") == tc.get("id"):
+                        try:
+                            res_obj = json.loads(nxt.get("content") or "{}")
+                        except ValueError:
+                            res_obj = {}
+                        break
+                prior_calls.append((str(fn.get("name") or ""), _norm_call_args(fn), res_obj))
+
+    for p_name, p_args, p_res in reversed(prior_calls):
+        if p_name != cur_name:
+            continue
+        p_ok = bool(p_res.get("ok"))
+        if p_args == cur_args or (p_ok and cur_name not in _MULTI_ARG_TOOLS):
+            return {"role": "assistant", "content": str(p_res.get("esito") or p_res.get("errore") or last_result.get("esito") or "Fatto.")}
+    return message
 
 
 def _free_port() -> int:
@@ -709,7 +751,10 @@ class LocalLLMClient:
         spoken = result_reply(messages)
         if spoken is not None:
             return ChatResult(message={"role": "assistant", "content": spoken}, model=name, finish_reason="stop")
-        allowed_set = LOCAL_TOOLS if name == "qwen2.5-0.5b" else LOCAL_TOOLS_FULL
+        allowed_set = set(LOCAL_TOOLS if name == "qwen2.5-0.5b" else LOCAL_TOOLS_FULL)
+        last_user_text = next((str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), "")
+        if not _wants_screenshot(last_user_text):
+            allowed_set.discard("take_screenshot")
         usable = [t for t in (tools or []) if (t.get("function") or {}).get("name") in allowed_set]
         names = [] if tool_choice == "none" else [t["function"]["name"] for t in usable]
         chat = to_local_messages(messages, build_prompt(usable, self._user_name()))

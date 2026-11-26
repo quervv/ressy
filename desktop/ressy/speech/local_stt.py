@@ -152,7 +152,16 @@ class LocalWhisper:
                 continue
             p = getattr(seg, "probability", float("nan"))
             logprob = math.log(max(p, 1e-6)) if p == p else -0.3
-            out.append({"text": text, "avg_logprob": logprob, "no_speech_prob": 0.0, "compression_ratio": 1.0})
+            t0 = round(max(0.0, float(getattr(seg, "t0", 0) or 0) / 100.0), 3)
+            t1 = round(max(t0, float(getattr(seg, "t1", 0) or 0) / 100.0), 3)
+            out.append({
+                "text": text,
+                "start": t0,
+                "end": t1,
+                "avg_logprob": logprob,
+                "no_speech_prob": 0.0,
+                "compression_ratio": 1.0,
+            })
         return {"text": " ".join(s["text"] for s in out), "segments": out}
 
 

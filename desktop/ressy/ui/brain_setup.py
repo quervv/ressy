@@ -9,18 +9,22 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
+    QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from ..config import CLAUDE_MODELS, DEFAULT_LOCAL_LLM_MODEL, LOCAL_LLM_MODELS, LOCAL_STT_MODELS, PROVIDER_NAMES
+from ..config import CLAUDE_MODELS, DEFAULT_LOCAL_LLM_MODEL, DEFAULT_MODEL_SERVER_PORT, LOCAL_LLM_MODELS, LOCAL_STT_MODELS, PROVIDER_NAMES, normalize_custom_url
 from ..paths import resource_path
 from . import theme
 from ..i18n import tr
@@ -69,6 +73,14 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "local": {
         "tagline": tr("Gratis e offline, scaricata sul PC."),
         "badge": tr("Senza chiave"),
+        "placeholder": "",
+        "url": "",
+        "site": "",
+        "models": [],
+    },
+    "custom": {
+        "tagline": tr("Usa il tuo server (Ollama, llama.cpp, VPS…)."),
+        "badge": tr("Self-host"),
         "placeholder": "",
         "url": "",
         "site": "",
@@ -289,6 +301,7 @@ class _Relay(QObject):
     verified = Signal(str, str, object, object)
     progress = Signal(str, int, int)
     downloaded = Signal(str, str)
+    hostResult = Signal(object, str)
 
 
 class BrainSetup(QWidget):
@@ -300,6 +313,7 @@ class BrainSetup(QWidget):
         self.auto_verify = auto_verify
         self.keys = {name: "" for name in PROVIDERS}
         self.models = {name: "" for name in PROVIDERS}
+        self.custom_base_url = ""
         self._available: dict[str, list[str] | None] = {name: None for name in PROVIDERS}
         self._current = "groq"
         self._checking: tuple[str, str] | None = None
@@ -307,10 +321,16 @@ class BrainSetup(QWidget):
         self._verified: dict[str, str] = {}
         self.relay = _Relay()
         self.relay.verified.connect(self._on_verified)
+        self.relay.hostResult.connect(self._on_host_result)
 
         cards = [
-            ChoiceCard(name, PROVIDER_NAMES[name], info["tagline"], logo="pc" if name == "local" else name,
-                       badge=info["badge"])
+            ChoiceCard(
+                name,
+                PROVIDER_NAMES[name],
+                info["tagline"],
+                logo="pc" if name == "local" else ("server" if name == "custom" else name),
+                badge=info["badge"],
+            )
             for name, info in PROVIDERS.items()
         ]
         self.cards = CardRow(cards, columns=3)
@@ -351,12 +371,15 @@ class BrainSetup(QWidget):
         form.addWidget(self.model, 2, 1)
         form.setColumnStretch(1, 1)
 
+        self._build_custom_box()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(self.cards)
         layout.addWidget(self.key_hint)
         layout.addWidget(self.key_box)
+        layout.addWidget(self.custom_box)
         self.keys_hint = _hint(
             tr("Puoi inserire <b>più chiavi</b>: scegli una scheda, incolla la chiave, poi torna su quella che vuoi "
             "usare. Se la prima arriva al limite, Ressy continua con le altre.")
@@ -366,10 +389,133 @@ class BrainSetup(QWidget):
         self.local_ai.readiness.connect(self._local_changed)
         layout.addWidget(self.local_ai)
 
-    def load(self, provider: str, keys: dict[str, str], models: dict[str, str], local_model: str = "") -> None:
+    def _build_custom_box(self) -> None:
+        self.custom_box = QWidget()
+        root = QVBoxLayout(self.custom_box)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
+
+        presets = QHBoxLayout()
+        presets.setSpacing(8)
+        for label, url in (
+            (tr("Questo PC (8088)"), "http://127.0.0.1:8088/v1"),
+            ("Ollama (11434)", "http://127.0.0.1:11434/v1"),
+            ("LM Studio (1234)", "http://127.0.0.1:1234/v1"),
+        ):
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _=False, u=url: self._apply_custom_preset(u))
+            presets.addWidget(btn)
+        presets.addStretch(1)
+        root.addLayout(presets)
+
+        self.custom_url = QLineEdit()
+        self.custom_url.setPlaceholderText("http://127.0.0.1:8088/v1")
+        self.custom_url.textEdited.connect(self._custom_edited)
+
+        self.custom_key = QLineEdit()
+        self.custom_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.custom_key.setPlaceholderText(tr("Opzionale (lascia vuoto se non serve)"))
+        self.custom_key.textEdited.connect(self._custom_edited)
+        show_c = QPushButton(tr("Mostra"))
+        show_c.setCheckable(True)
+        show_c.toggled.connect(lambda on: (
+            self.custom_key.setEchoMode(QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password),
+            show_c.setText(tr("Nascondi") if on else tr("Mostra")),
+        ))
+        self.custom_verify = QPushButton(tr("Connetti"))
+        self.custom_verify.clicked.connect(self.verify)
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        url_row.addWidget(self.custom_url, 1)
+        url_row.addWidget(self.custom_verify)
+
+        ckey_row = QHBoxLayout()
+        ckey_row.setSpacing(8)
+        ckey_row.addWidget(self.custom_key, 1)
+        ckey_row.addWidget(show_c)
+
+        self.custom_model = QComboBox()
+        self.custom_model.setEditable(True)
+        self.custom_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        if self.custom_model.lineEdit() is not None:
+            self.custom_model.lineEdit().setPlaceholderText(tr("Automatico dal server (o scrivi il nome esatto)"))
+            self.custom_model.lineEdit().textEdited.connect(self._custom_edited)
+
+        self.custom_status = QLabel()
+        self.custom_status.setWordWrap(True)
+
+        form = QGridLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(10)
+        form.addWidget(QLabel(tr("URL server AI")), 0, 0)
+        form.addLayout(url_row, 0, 1)
+        form.addWidget(self.custom_status, 1, 1)
+        form.addWidget(QLabel(tr("Token (opzionale)")), 2, 0)
+        form.addLayout(ckey_row, 2, 1)
+        form.addWidget(QLabel(tr("Modello")), 3, 0)
+        form.addWidget(self.custom_model, 3, 1)
+        form.setColumnStretch(1, 1)
+        root.addLayout(form)
+
+        host_card = QFrame()
+        host_card.setStyleSheet(
+            f"QFrame {{ background: {theme.FIELD}; border: 1px solid {theme.PLATE_EDGE}; border-radius: 10px; }}"
+        )
+        hb = QVBoxLayout(host_card)
+        hb.setContentsMargins(14, 12, 14, 12)
+        hb.setSpacing(8)
+
+        htitle = QLabel(tr("CREA IL TUO SERVER PER IL MODELLO (HOST SU QUESTO PC)"))
+        htitle.setStyleSheet(f"color: {theme.LILAC}; font-size: 11px; font-weight: 700; border: none;")
+        hb.addWidget(htitle)
+
+        self.host_model = QComboBox()
+        browse_gguf = QPushButton(tr("Scegli .gguf…"))
+        browse_gguf.clicked.connect(self._browse_gguf)
+        refresh_gguf = QPushButton(tr("Aggiorna"))
+        refresh_gguf.clicked.connect(self._refresh_gguf_list)
+        mrow = QHBoxLayout()
+        mrow.setSpacing(8)
+        mrow.addWidget(self.host_model, 1)
+        mrow.addWidget(browse_gguf)
+        mrow.addWidget(refresh_gguf)
+        hb.addLayout(mrow)
+
+        opt_row = QHBoxLayout()
+        opt_row.setSpacing(10)
+        opt_row.addWidget(QLabel(tr("Porta")))
+        self.host_port = QSpinBox()
+        self.host_port.setRange(1024, 65535)
+        self.host_port.setValue(DEFAULT_MODEL_SERVER_PORT)
+        self.host_lan = QCheckBox(tr("Accessibile anche in rete / altri PC (0.0.0.0)"))
+        gen_tok = QPushButton(tr("Genera token"))
+        gen_tok.clicked.connect(self._generate_custom_token)
+        self.host_toggle = QPushButton(tr("Crea e avvia server AI"))
+        self.host_toggle.setObjectName("primary")
+        self.host_toggle.clicked.connect(self._toggle_host_server)
+        opt_row.addWidget(self.host_port)
+        opt_row.addWidget(self.host_lan, 1)
+        opt_row.addWidget(gen_tok)
+        opt_row.addWidget(self.host_toggle)
+        hb.addLayout(opt_row)
+
+        self.host_info = QLabel(tr("Puoi servire un modello Qwen già scaricato o un qualsiasi file .gguf, poi collegarci Ressy o un altro PC."))
+        self.host_info.setWordWrap(True)
+        self.host_info.setObjectName("hint")
+        self.host_info.setStyleSheet("border: none;")
+        hb.addWidget(self.host_info)
+
+        root.addWidget(host_card)
+        self._refresh_gguf_list()
+        self._sync_host_status()
+
+    def load(self, provider: str, keys: dict[str, str], models: dict[str, str], local_model: str = "",
+             custom_url: str = "") -> None:
         self.local_ai.load(local_model)
         self.keys.update({k: v or "" for k, v in keys.items()})
         self.models.update({k: v or "" for k, v in models.items()})
+        self.custom_base_url = normalize_custom_url(custom_url) or (custom_url or "").strip()
         self._current = provider
         self._loading = True
         try:
@@ -397,6 +543,9 @@ class BrainSetup(QWidget):
             "gemini_model": self.models["gemini"] or PROVIDERS["gemini"]["models"][0][0],
             "openrouter_api_key": self.keys["openrouter"].strip(),
             "openrouter_model": "" if self.models["openrouter"] in ("", "auto") else self.models["openrouter"],
+            "custom_base_url": normalize_custom_url(self.custom_base_url),
+            "custom_model": self.models["custom"].strip(),
+            "custom_api_key": self.keys["custom"].strip(),
             "local_llm_model": self.local_ai.value(),
         }
 
@@ -405,17 +554,27 @@ class BrainSetup(QWidget):
         provider = self.provider()
         if provider == "local":
             return self.local_ai.problem(required=True)
+        if provider == "custom":
+            if not normalize_custom_url(self.custom_base_url):
+                return tr("Inserisci l'URL del tuo server AI o avvia un server su questo PC.")
+            return self.local_ai.problem(required=False)
         if not self.keys[provider].strip():
             return tr("Incolla la chiave API di {value} (è gratis crearla).").format(value=PROVIDER_NAMES[provider])
         return self.local_ai.problem(required=False)
 
     def focus_key(self) -> None:
-        self.key.setFocus()
+        if self.provider() == "custom":
+            self.custom_url.setFocus()
+        else:
+            self.key.setFocus()
 
     def is_verified(self) -> bool:
         provider = self.provider()
         if provider == "local":
             return self.local_ai.is_ready()
+        if provider == "custom":
+            url = normalize_custom_url(self.custom_base_url)
+            return bool(url) and self._verified.get("custom") == url
         key = (self.keys.get(provider) or "").strip()
         return bool(key) and self._verified.get(provider) == key
 
@@ -423,11 +582,21 @@ class BrainSetup(QWidget):
         self._remember()
         if self.provider() == "local":
             return
+        if self.provider() == "custom":
+            if normalize_custom_url(self.custom_base_url) and not self.is_verified() and self._checking is None:
+                self.verify()
+            return
         if self.keys[self.provider()].strip() and not self.is_verified() and self._checking is None:
             self.verify()
 
     def _remember(self) -> None:
         if self._current == "local":
+            self._mark_keys()
+            return
+        if self._current == "custom":
+            self.custom_base_url = self.custom_url.text().strip()
+            self.keys["custom"] = self.custom_key.text().strip()
+            self.models["custom"] = (self.custom_model.currentData() or self.custom_model.currentText() or "").strip()
             self._mark_keys()
             return
         self.keys[self._current] = self.key.text().strip()
@@ -440,6 +609,9 @@ class BrainSetup(QWidget):
             if name == "local":
                 has = self.local_ai.is_ready()
                 status = tr("Scaricata") if has else ""
+            elif name == "custom":
+                has = bool(normalize_custom_url(self.custom_base_url))
+                status = tr("Configurato") if has else ""
             else:
                 has = bool((self.keys.get(name) or "").strip())
                 status = tr("Chiave inserita") if has else ""
@@ -463,7 +635,9 @@ class BrainSetup(QWidget):
 
     def _show(self, provider: str) -> None:
         local = provider == "local"
-        self.key_box.setVisible(not local)
+        custom = provider == "custom"
+        self.key_box.setVisible(not local and not custom)
+        self.custom_box.setVisible(custom)
         self.keys_hint.setVisible(not local)
         self.local_ai.set_required(local)
         if local:
@@ -473,6 +647,17 @@ class BrainSetup(QWidget):
                 "È meno brava dei servizi online, ma per aprire app, siti, musica e meteo basta.")
             )
             self._set_status("", "")
+            return
+        if custom:
+            self.key_hint.setText(
+                tr("Collega Ressy a un <b>tuo</b> server AI OpenAI-compatibile (Ollama, LM Studio, llama.cpp o VPS), "
+                "oppure creane e avviamone uno direttamente da qui sotto.")
+            )
+            self.custom_url.setText(self.custom_base_url)
+            self.custom_key.setText(self.keys["custom"])
+            self._fill_custom_models()
+            self._refresh_gguf_list()
+            self._sync_host_status()
             return
         info = PROVIDERS[provider]
         name = PROVIDER_NAMES[provider]
@@ -486,7 +671,152 @@ class BrainSetup(QWidget):
         self._set_status("", "")
         self._fill_models(provider)
 
+    def _apply_custom_preset(self, url: str) -> None:
+        self.custom_url.setText(url)
+        self._custom_edited()
+
+    def _custom_edited(self) -> None:
+        self.custom_base_url = self.custom_url.text().strip()
+        self.keys["custom"] = self.custom_key.text().strip()
+        self.models["custom"] = (self.custom_model.currentData() or self.custom_model.currentText() or "").strip()
+        self._mark_keys()
+        self._set_custom_status("", "")
+        self.validity.emit(self.is_verified())
+
+    def _fill_custom_models(self) -> None:
+        current = (self.models.get("custom") or "").strip()
+        available = self._available.get("custom") or []
+        self.custom_model.blockSignals(True)
+        self.custom_model.clear()
+        for mid in available:
+            self.custom_model.addItem(mid, mid)
+        if current and self.custom_model.findText(current) < 0:
+            self.custom_model.insertItem(0, current, current)
+        if current:
+            self.custom_model.setEditText(current)
+        elif available:
+            self.custom_model.setCurrentIndex(0)
+        else:
+            self.custom_model.setEditText("")
+        self.custom_model.blockSignals(False)
+
+    def _set_custom_status(self, kind: str, text: str) -> None:
+        self.custom_status.setObjectName(kind or "hint")
+        self.custom_status.setText(text)
+        self.custom_status.setVisible(bool(text))
+        self.custom_status.style().unpolish(self.custom_status)
+        self.custom_status.style().polish(self.custom_status)
+
+    def _refresh_gguf_list(self) -> None:
+        from ..brain.model_server import scan_gguf_models
+
+        prev = str(self.host_model.currentData() or "")
+        self.host_model.clear()
+        for label, path in scan_gguf_models():
+            self.host_model.addItem(label, str(path))
+        if self.host_model.count() == 0:
+            self.host_model.addItem(tr("Nessun file .gguf trovato (scegli o scarica sotto)"), "")
+        elif prev:
+            idx = self.host_model.findData(prev)
+            if idx >= 0:
+                self.host_model.setCurrentIndex(idx)
+
+    def _browse_gguf(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, tr("Scegli modello GGUF"), "", "GGUF (*.gguf);;All files (*)")
+        if path:
+            from pathlib import Path
+
+            p = Path(path)
+            if self.host_model.count() == 1 and not self.host_model.itemData(0):
+                self.host_model.clear()
+            idx = self.host_model.findData(str(p))
+            if idx < 0:
+                self.host_model.insertItem(0, p.name, str(p))
+                idx = 0
+            self.host_model.setCurrentIndex(idx)
+
+    def _generate_custom_token(self) -> None:
+        from ..brain.model_server import generate_api_key
+
+        tok = generate_api_key()
+        self.custom_key.setText(tok)
+        self._custom_edited()
+
+    def _sync_host_status(self) -> None:
+        from ..brain.model_server import server_urls, shared_runner
+
+        runner = shared_runner()
+        if runner.running and runner.config is not None:
+            self.host_toggle.setText(tr("Ferma server AI"))
+            expose = runner.config.host in ("0.0.0.0", "::")
+            urls = server_urls(runner.config.port, expose_lan=expose)
+            self.host_info.setText(
+                tr("<span style='color:{BACKLIGHT}'>Server attivo</span> · Connettiti a: <b>{urls}</b>").format(
+                    BACKLIGHT=theme.BACKLIGHT,
+                    urls=", ".join(urls),
+                )
+            )
+        else:
+            self.host_toggle.setText(tr("Crea e avvia server AI"))
+
+    def _toggle_host_server(self) -> None:
+        from ..brain.model_server import ModelServerConfig, server_urls, shared_runner
+
+        runner = shared_runner()
+        if runner.running:
+            runner.stop()
+            self.host_info.setText(tr("Server AI fermato."))
+            self._sync_host_status()
+            return
+
+        model_path = str(self.host_model.currentData() or "").strip()
+        if not model_path:
+            self._set_custom_status("error", tr("Scegli prima un file .gguf (oppure scarica un modello locale qui sotto)."))
+            return
+        port = int(self.host_port.value())
+        expose = self.host_lan.isChecked()
+        cfg = ModelServerConfig(
+            model_path=model_path,
+            host="0.0.0.0" if expose else "127.0.0.1",
+            port=port,
+            api_key=self.custom_key.text().strip(),
+        )
+        self.host_toggle.setEnabled(False)
+        self.host_info.setText(tr("Avvio il server del modello AI…"))
+        urls = server_urls(port, expose_lan=expose)
+        self.custom_url.setText(urls[0])
+        self._custom_edited()
+
+        def work() -> None:
+            try:
+                models = runner.start(cfg, wait_s=60.0)
+                self.relay.hostResult.emit(models, "")
+            except Exception as exc:
+                self.relay.hostResult.emit([], str(exc) or type(exc).__name__)
+
+        threading.Thread(target=work, name="ressy-model-server", daemon=True).start()
+
+    def _on_host_result(self, models: object, error: str) -> None:
+        self.host_toggle.setEnabled(True)
+        self._sync_host_status()
+        if error:
+            self._set_custom_status("error", error)
+            self.host_info.setText(tr("Avvio non riuscito: {err}").format(err=error))
+            return
+        model_list = list(models or [])
+        if model_list:
+            self._available["custom"] = model_list
+            self.models["custom"] = model_list[0]
+            self._fill_custom_models()
+        norm = normalize_custom_url(self.custom_url.text())
+        self._verified["custom"] = norm
+        self._set_custom_status("ok", tr("Server AI creato e connesso!"))
+        self.validity.emit(self.is_verified())
+
     def _fill_models(self, provider: str) -> None:
+        if provider == "custom":
+            self._fill_custom_models()
+            return
         current = self.models.get(provider) or ""
         available = self._available.get(provider)
         items = list(PROVIDERS[provider]["models"])
@@ -529,6 +859,27 @@ class BrainSetup(QWidget):
 
     def verify(self) -> None:
         provider = self.provider()
+        if provider == "custom":
+            url = normalize_custom_url(self.custom_url.text())
+            key = self.custom_key.text().strip()
+            if not url:
+                self._set_custom_status("error", tr("Inserisci prima un URL valido (es. http://127.0.0.1:8088/v1)."))
+                return
+            self.custom_verify.setEnabled(False)
+            self._set_custom_status("hint", tr("Connessione a {url}…").format(url=url))
+            self._checking = ("custom", url)
+
+            def work_custom() -> None:
+                from ..brain.providers import verify_key_blocking
+
+                try:
+                    self.relay.verified.emit("custom", url, verify_key_blocking("custom", key, base_url=url), None)
+                except Exception as exc:
+                    self.relay.verified.emit("custom", url, None, exc)
+
+            threading.Thread(target=work_custom, name="ressy-verify", daemon=True).start()
+            return
+
         key = self.key.text().strip()
         if not key:
             self._set_status("error", tr("Incolla prima la chiave."))
@@ -551,6 +902,24 @@ class BrainSetup(QWidget):
         if self._checking != (provider, key):
             return
         self._checking = None
+        if provider == "custom":
+            self.custom_verify.setEnabled(True)
+            if self.provider() != "custom":
+                return
+            if error is not None:
+                self._set_custom_status("error", str(error))
+                return
+            model_list = list(models or [])
+            self._available["custom"] = model_list
+            self._verified["custom"] = key
+            self._fill_custom_models()
+            self._set_custom_status(
+                "ok",
+                tr("Server connesso! Trovati {n} modelli.").format(n=len(model_list)) if model_list else tr("Server connesso!"),
+            )
+            self.validity.emit(self.is_verified())
+            return
+
         self.verify_button.setEnabled(True)
         if provider != self.provider():
             return

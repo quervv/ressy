@@ -194,7 +194,7 @@ class GroqClient:
         models: list[str] | tuple[str, ...],
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | None = None,
-        max_tokens: int = 1500,
+        max_tokens: int = 800,
         temperature: float = 0.4,
         extra: dict[str, Any] | None = None,
     ) -> ChatResult:
@@ -249,14 +249,27 @@ class GroqClient:
             if language == "it"
             else "Answer concisely (at most 4 sentences) with the key facts and dates. No links, no markdown."
         )
-        result = await self.chat(
-            [{"role": "system", "content": system}, {"role": "user", "content": question}],
-            models=WEB_SEARCH_MODELS,
-            tools=[{"type": "browser_search"}],
-            tool_choice="required",
-            max_tokens=2500,
-            temperature=0.3,
-        )
+        try:
+            result = await self.chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": question}],
+                models=WEB_SEARCH_MODELS,
+                tools=[{"type": "browser_search"}],
+                tool_choice="required",
+                max_tokens=1600,
+                temperature=0.3,
+            )
+        except GroqError as exc:
+            if exc.status == 400 and exc.code == "tool_use_failed":
+                result = await self.chat(
+                    [{"role": "system", "content": system}, {"role": "user", "content": question}],
+                    models=WEB_SEARCH_MODELS,
+                    tools=[{"type": "browser_search"}],
+                    tool_choice="auto",
+                    max_tokens=1600,
+                    temperature=0.3,
+                )
+            else:
+                raise
         return strip_citations(str(result.message.get("content") or ""))
 
     async def transcribe(

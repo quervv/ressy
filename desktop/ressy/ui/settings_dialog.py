@@ -448,7 +448,15 @@ class SettingsDialog(QDialog):
             self.banner.hide()
         if any(word in reason for word in ("modello vocale", "voce con", tr("modello vocale"), tr("voce con"))):
             self.nav.setCurrentRow(PAGES.index(tr("Voce")))
-        elif not self.settings.provider_key(self.settings.llm_provider) or "chiave" in reason or tr("chiave") in reason:
+        elif (
+            (self.settings.llm_provider == "custom" and not self.settings.custom_base_url)
+            or (
+                self.settings.llm_provider not in ("local", "custom")
+                and not self.settings.provider_key(self.settings.llm_provider)
+            )
+            or "chiave" in reason
+            or tr("chiave") in reason
+        ):
             self.nav.setCurrentRow(PAGES.index(tr("Intelligenza")))
             self.brain.focus_key()
         self.show()
@@ -471,10 +479,11 @@ class SettingsDialog(QDialog):
         self.brain.load(
             s.llm_provider,
             {"groq": s.groq_api_key, "claude": s.anthropic_api_key, "gemini": s.gemini_api_key,
-             "openrouter": s.openrouter_api_key},
+             "openrouter": s.openrouter_api_key, "custom": s.custom_api_key},
             {"groq": s.llm_model, "claude": s.claude_model, "gemini": s.gemini_model,
-             "openrouter": s.openrouter_model or "auto"},
+             "openrouter": s.openrouter_model or "auto", "custom": s.custom_model},
             s.local_llm_model,
+            custom_url=s.custom_base_url,
         )
         self.fallback.setChecked(s.llm_fallback)
         self.quick.setChecked(s.quick_commands)

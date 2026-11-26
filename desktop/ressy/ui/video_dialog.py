@@ -159,8 +159,18 @@ class VideoUploadDialog(QDialog):
         if c_idx >= 0:
             self.color_grade.setCurrentIndex(c_idx)
 
-        self.auto_captions = QCheckBox(tr("Sottotitoli automatici sincronizzati dall'audio"))
+        self.auto_captions = QCheckBox(tr("Sottotitoli automatici sincronizzati dall'audio (parola per parola)"))
         self.auto_captions.setChecked(bool(self._defaults.get("auto_captions", True)))
+
+        self.caption_mode = QComboBox()
+        self.caption_mode.addItem(tr("Dinamici parola per parola (stile TikTok / Reels)"), "word")
+        self.caption_mode.addItem(tr("Card ad impatto classiche"), "phrase")
+        m_idx = self.caption_mode.findData(str(self._defaults.get("caption_mode") or "word"))
+        if m_idx >= 0:
+            self.caption_mode.setCurrentIndex(m_idx)
+
+        self.kinetic_broll = QCheckBox(tr("Slide 3D / Grafiche B-Roll ed effetti sonori (whoosh, pop)"))
+        self.kinetic_broll.setChecked(bool(self._defaults.get("kinetic_broll", True)))
 
         self.progress_bar = QCheckBox(tr("Barra di avanzamento moderna nella parte bassa"))
         self.progress_bar.setChecked(bool(self._defaults.get("progress_bar", True)))
@@ -174,9 +184,11 @@ class VideoUploadDialog(QDialog):
         form.addRow(tr("Formato"), self.ratio)
         form.addRow(tr("Transizioni"), self.transition)
         form.addRow(tr("Color grading"), self.color_grade)
+        form.addRow(tr("Sottotitoli"), self.caption_mode)
         form.addRow(tr("Titolo iniziale"), self.hook_title)
         form.addRow(tr("Frasi ad impatto"), self.phrases)
         form.addRow("", self.auto_captions)
+        form.addRow("", self.kinetic_broll)
         form.addRow("", self.progress_bar)
         form.addRow("", self.render_preview)
 
@@ -249,9 +261,11 @@ class VideoUploadDialog(QDialog):
             "aspect_ratio": str(self.ratio.currentData() or "9:16"),
             "transition": str(self.transition.currentData() or "smooth"),
             "color_grade": str(self.color_grade.currentData() or "vivid"),
+            "caption_mode": str(self.caption_mode.currentData() or "word"),
             "title": self.hook_title.text().strip(),
             "phrases": phrases,
             "auto_captions": self.auto_captions.isChecked(),
+            "kinetic_broll": self.kinetic_broll.isChecked(),
             "progress_bar": self.progress_bar.isChecked(),
             "render_preview": self.render_preview.isChecked(),
         }

@@ -540,10 +540,11 @@ class Setup(Backdrop):
         self.brain.load(
             s.llm_provider,
             {"groq": s.groq_api_key, "claude": s.anthropic_api_key, "gemini": s.gemini_api_key,
-             "openrouter": s.openrouter_api_key},
+             "openrouter": s.openrouter_api_key, "custom": s.custom_api_key},
             {"groq": s.llm_model, "claude": s.claude_model, "gemini": s.gemini_model,
-             "openrouter": s.openrouter_model or "auto"},
+             "openrouter": s.openrouter_model or "auto", "custom": s.custom_model},
             s.local_llm_model,
+            custom_url=s.custom_base_url,
         )
         v.addWidget(self.brain)
         v.addStretch(1)
