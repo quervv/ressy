@@ -80,7 +80,9 @@ def clean_transcription(payload: dict[str, Any], lenient: bool = False) -> Trans
             if not lenient:
                 if no_speech > 0.6 and logprob < -0.7:
                     continue
-                if compression > 2.6 or logprob < -1.25:
+                if no_speech > 0.4 and logprob < -1.1:
+                    continue
+                if compression > 2.6 or logprob < -1.95:
                     continue
             elif compression > 3.0:
                 continue
@@ -166,9 +168,15 @@ class SpeechToText:
 
     def _prompt(self) -> str:
         if self.settings.language == "en":
-            base = "Ressy, wake up! Hi Ressy, open Discord. What's the weather? Open time.is in the browser."
+            base = (
+                "Ressy, wake up! Hi Ressy, open Discord, Spotify, CapCut, DaVinci Resolve or time.is, "
+                "edit a video, send a message on Discord, create a folder, search on Google."
+            )
         else:
-            base = "Ressy, sveglia! Ciao Ressy, apri Discord, Spotify o time.is. Che meteo c'è?"
+            base = (
+                "Ressy, sveglia! Ciao Ressy, apri Discord, Spotify, CapCut, DaVinci Resolve, WhatsApp o time.is, "
+                "edita un video, scrivi su Discord, crea cartella, metti su YouTube. Che meteo c'è?"
+            )
         names: list[str] = []
         if self.settings.user_name:
             names.append(self.settings.user_name)

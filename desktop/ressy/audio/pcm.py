@@ -101,7 +101,8 @@ def prepare_for_stt(pcm: np.ndarray, rate: int) -> np.ndarray:
     blocks = samples[: count * frame].astype(np.float32).reshape(count, frame)
     rms = np.sqrt(np.mean(blocks * blocks, axis=1)) + 1e-9
     db = 20 * np.log10(rms / 32768.0)
-    loud = np.flatnonzero(db > max(-55.0, float(db.max()) - 35.0))
+    ref_db = min(-15.0, float(np.percentile(db, 95)))
+    loud = np.flatnonzero(db > max(-55.0, ref_db - 35.0))
     if loud.size:
         margin = int(0.3 / 0.03)
         first = max(0, loud[0] - margin)

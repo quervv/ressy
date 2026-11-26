@@ -6,14 +6,16 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
+import zipfile
 from pathlib import Path
 
 import httpx
 
-from ..paths import app_dir
+from ..paths import app_dir, user_folder
 from ..speech.textnorm import normalize
-from . import screen, winapi
+from . import platform_os, screen, winapi
 from .apps import _matching_windows, launch
 from .registry import Tool, ToolContext, ToolError, params
 from ..i18n import N_, language, tr
@@ -45,19 +47,24 @@ def resolve_path(name: str, folder: str = "") -> Path:
         raise ToolError(tr("Manca il nome del file."))
     key = normalize(folder) if folder else ""
     if key in FOLDERS:
-        base = Path(winapi.known_folder(FOLDERS[key]) or _home() / "Desktop")
+        base = Path(winapi.known_folder(FOLDERS[key]) or _home() / "Desktop") if sys.platform == "win32" else user_folder(FOLDERS[key])
     elif folder.strip():
-        raw = Path(os.path.expandvars(os.path.expanduser(folder.strip().strip('"').replace("/", "\\"))))
+        raw_txt = folder.strip().strip('"')
+        if sys.platform == "win32":
+            raw_txt = raw_txt.replace("/", "\\")
+        raw = Path(os.path.expandvars(os.path.expanduser(raw_txt)))
         if raw.is_absolute():
             base = raw
         else:
             first = normalize(raw.parts[0]) if raw.parts else ""
             if first in FOLDERS:
-                base = Path(winapi.known_folder(FOLDERS[first]) or _home() / raw.parts[0]).joinpath(*raw.parts[1:])
+                first_base = Path(winapi.known_folder(FOLDERS[first]) or _home() / raw.parts[0]) if sys.platform == "win32" else user_folder(FOLDERS[first])
+                base = first_base.joinpath(*raw.parts[1:])
             else:
-                base = Path(winapi.known_folder("desktop") or _home() / "Desktop") / raw
+                desktop_base = Path(winapi.known_folder("desktop") or _home() / "Desktop") if sys.platform == "win32" else user_folder("desktop")
+                base = desktop_base / raw
     else:
-        base = Path(winapi.known_folder("desktop") or _home() / "Desktop")
+        base = Path(winapi.known_folder("desktop") or _home() / "Desktop") if sys.platform == "win32" else user_folder("desktop")
     path = Path(name)
     if not path.is_absolute():
         path = base / path
@@ -92,7 +99,7 @@ def create_file(ctx: ToolContext, args: dict) -> str:
         path.write_text(content, encoding=encoding, newline="")
         done = tr("Ho creato {name} in {parent}.")
     if args.get("open"):
-        os.startfile(str(path))
+        platform_os.open_path(path)
     return done.format(name=path.name, parent=path.parent)
 
 
@@ -104,7 +111,7 @@ _PLACES = {"desktop": (N_("sul Desktop"), N_("Desktop")), "documents": (N_("in D
 def _known_places() -> list[tuple[Path, str, str]]:
     places = []
     for key, (said, shown) in _PLACES.items():
-        known = winapi.known_folder(key)
+        known = winapi.known_folder(key) if sys.platform == "win32" else str(user_folder(key))
         if known:
             places.append((Path(known).resolve(), tr(said), tr(shown)))
     return places
@@ -135,12 +142,17 @@ def file_action(ctx: ToolContext, args: dict) -> str:
     source = resolve_path(args["name"], args.get("folder") or "")
     if not source.exists():
         raise ToolError(tr("Non trovo «{name}» {where}.").format(name=source.name, where=where(source.parent)))
+    if action == "open":
+        platform_os.open_path(source)
+        kind = tr("la cartella") if source.is_dir() else tr("il file")
+        return tr("Ho aperto {kind} {name}.").format(kind=kind, name=source.name)
     protected = {_home(), *(base for base, _, _ in _known_places())}
-    if source in protected or (source.parent == _home() and source.is_dir()):
+    if action in ("delete", "rename", "move") and (source in protected or (source.parent == _home() and source.is_dir())):
         raise ToolError(tr("È una delle cartelle principali del tuo utente: non la sposto e non la cancello."))
     kind = tr("la cartella") if source.is_dir() else tr("il file")
     if action == "delete":
-        if not winapi.recycle(str(source)):
+        ok = winapi.recycle(str(source)) if sys.platform == "win32" else platform_os.unix_recycle(source)
+        if not ok:
             raise ToolError(tr("Windows non mi ha permesso di cestinare {kind} {name}.").format(kind=kind, name=source.name))
         return tr("Ho spostato {kind} {name} nel Cestino (si può ripristinare da lì).").format(kind=kind, name=source.name)
     if action == "rename":
@@ -154,6 +166,41 @@ def file_action(ctx: ToolContext, args: dict) -> str:
             raise ToolError(tr("Esiste già qualcosa che si chiama {new_name} lì.").format(new_name=new_name))
         source.rename(target)
         return tr("Ho rinominato {kind} {name} in {name2}.").format(kind=kind, name=source.name, name2=target.name)
+    if action == "zip":
+        dest_dir = resolve_path(".", args["destination"]) if (args.get("destination") or "").strip() else source.parent
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        archive_name = (args.get("new_name") or "").strip() or (source.stem if source.is_file() else source.name)
+        if not archive_name.lower().endswith(".zip"):
+            archive_name += ".zip"
+        target = dest_dir / archive_name
+        if target.exists():
+            raise ToolError(tr("Esiste già l'archivio {name}.").format(name=target.name))
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+            if source.is_file():
+                zf.write(source, source.name)
+            else:
+                for root_dir, _, files in os.walk(source):
+                    for fn in files:
+                        full = Path(root_dir) / fn
+                        zf.write(full, str(Path(source.name) / full.relative_to(source)))
+        return tr("Ho compresso {name} in {archive}.").format(name=source.name, archive=target.name)
+    if action == "unzip":
+        if not source.is_file() or source.suffix.lower() != ".zip":
+            raise ToolError(tr("{name} non è un archivio .zip.").format(name=source.name))
+        dest_dir = (
+            resolve_path(".", args["destination"])
+            if (args.get("destination") or "").strip()
+            else source.parent / source.stem
+        )
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        base_resolved = dest_dir.resolve()
+        with zipfile.ZipFile(source, "r") as zf:
+            for member in zf.infolist():
+                member_path = (base_resolved / member.filename).resolve()
+                if member_path != base_resolved and base_resolved not in member_path.parents:
+                    raise ToolError(tr("L'archivio contiene percorsi non sicuri."))
+            zf.extractall(base_resolved)
+        return tr("Ho estratto {name} {where}.").format(name=source.name, where=where(dest_dir))
     destination = (args.get("destination") or "").strip()
     if not destination:
         raise ToolError(tr("In quale cartella devo metterlo?"))
@@ -172,6 +219,129 @@ def file_action(ctx: ToolContext, args: dict) -> str:
     else:
         shutil.copy2(source, target)
     return tr("Ho copiato {kind} {name} {where}.").format(kind=kind, name=source.name, where=where(folder))
+
+
+_SKIP_SEARCH = {"appdata", "node_modules", ".git", "__pycache__", ".venv", "venv", "$recycle.bin", ".cache"}
+
+
+def find_files(ctx: ToolContext, args: dict) -> str:
+    query = (args.get("query") or "").strip()
+    if not query:
+        raise ToolError(tr("Cosa devo cercare nei file?"))
+    folder_arg = (args.get("folder") or "").strip()
+    if folder_arg:
+        roots = [resolve_path(".", folder_arg)]
+    else:
+        roots = [Path(p) for k in ("desktop", "documents", "downloads", "pictures", "music", "videos")
+                 if (p := winapi.known_folder(k))]
+        if not roots:
+            roots = [_home()]
+    q_low = query.lower().lstrip("*")
+    q_norm = normalize(query)
+    deadline = time.monotonic() + 2.5
+    matches: list[tuple[int, Path]] = []
+    seen: set[str] = set()
+    queue: list[tuple[Path, int]] = [(r, 0) for r in roots if r.is_dir()]
+    while queue and time.monotonic() < deadline and len(matches) < 25:
+        folder, depth = queue.pop(0)
+        key = os.path.normcase(str(folder.resolve()))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        for entry in entries:
+            low = entry.name.lower()
+            if low in _SKIP_SEARCH or low.startswith("."):
+                continue
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                continue
+            if q_low in low or (q_norm and q_norm in normalize(entry.name)):
+                rank = 0 if low == q_low else (1 if low.startswith(q_low) else 2)
+                matches.append((rank, Path(entry.path)))
+            if is_dir and depth + 1 < 4:
+                queue.append((Path(entry.path), depth + 1))
+    if not matches:
+        return tr("Non ho trovato nessun file o cartella per «{query}».").format(query=query)
+    matches.sort(key=lambda item: (item[0], len(item[1].name), str(item[1])))
+    if args.get("open"):
+        best = matches[0][1]
+        platform_os.open_path(best)
+        return tr("Ho trovato e aperto {name} ({where}).").format(name=best.name, where=where(best.parent))
+    lines = [f"- {p.name} ({where(p.parent)})" for _, p in matches[:12]]
+    return tr("Ho trovato {count} risultato/i:\n").format(count=len(matches)) + "\n".join(lines)
+
+
+def _notes_path() -> Path:
+    return app_dir() / "notes.json"
+
+
+def _load_notes() -> list[dict[str, str]]:
+    try:
+        data = json.loads(_notes_path().read_text(encoding="utf-8"))
+        return [x for x in data if isinstance(x, dict) and x.get("text")]
+    except (OSError, ValueError):
+        return []
+
+
+def _save_notes(items: list[dict[str, str]]) -> None:
+    tmp = _notes_path().with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, _notes_path())
+
+
+def notes_tool(ctx: ToolContext, args: dict) -> str:
+    action = args["action"]
+    cat = (args.get("category") or "").strip().lower()
+    items = _load_notes()
+    if action == "add":
+        text = (args.get("text") or "").strip()
+        if not text:
+            raise ToolError(tr("Cosa devo segnare?"))
+        category = cat or "generale"
+        items.append({"text": text, "category": category})
+        _save_notes(items)
+        if category == "generale":
+            return tr("Segnato nelle note: {text}.").format(text=text)
+        return tr("Segnato in {category}: {text}.").format(category=category, text=text)
+    if action == "list":
+        filtered = [i for i in items if not cat or i.get("category", "generale") == cat]
+        if not filtered:
+            return tr("Non ci sono note in {category}.").format(category=cat) if cat else tr("Non hai nessuna nota salvata.")
+        lines = [
+            f"- {i['text']}" + (f" [{i['category']}]" if not cat and i.get("category", "generale") != "generale" else "")
+            for i in filtered
+        ]
+        return tr("Ecco le note:\n") + "\n".join(lines)
+    if action == "remove":
+        wanted = normalize(args.get("text") or "")
+        if not wanted:
+            raise ToolError(tr("Quale nota devo togliere?"))
+        remaining = []
+        removed_text = ""
+        for item in items:
+            if not removed_text and (not cat or item.get("category", "generale") == cat) and (
+                wanted in normalize(item["text"])
+            ):
+                removed_text = item["text"]
+                continue
+            remaining.append(item)
+        if not removed_text:
+            raise ToolError(tr("Non trovo quella nota."))
+        _save_notes(remaining)
+        return tr("Ho tolto «{text}» dalle note.").format(text=removed_text)
+    if action == "clear":
+        if cat:
+            remaining = [i for i in items if i.get("category", "generale") != cat]
+            _save_notes(remaining)
+            return tr("Ho svuotato la lista {category}.").format(category=cat)
+        _save_notes([])
+        return tr("Ho cancellato tutte le note.")
+    raise ToolError(tr("Azione non valida per le note."))
 
 
 def wait(ctx: ToolContext, args: dict) -> str:
@@ -231,6 +401,36 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
     text = args["text"]
     if len(text) > 20_000:
         raise ToolError(tr("Testo troppo lungo."))
+    if sys.platform != "win32":
+        window = _wait_window(app, 0)
+        if window is None:
+            entry, alternatives = ctx.services.apps.find(app)
+            if entry is None:
+                names = ", ".join(a.name for a in alternatives[:4])
+                raise ToolError(tr("Non trovo l'app '{app}'.").format(app=app) + (tr(" Forse: {names}?").format(names=names) if names else ""))
+            launch(entry)
+            window = _wait_window(app, 25)
+            if window is None:
+                raise ToolError(tr("{app} non si è aperto in tempo.").format(app=app))
+            time.sleep(1.2)
+        platform_os.unix_focus_window(window.hwnd, window.class_name)
+        time.sleep(0.35)
+        mod = platform_os.mod_key()
+        if args.get("new_document"):
+            platform_os.send_hotkey(mod, "n")
+            time.sleep(1.0)
+        platform_os.type_text(text)
+        time.sleep(0.25)
+        if args.get("press_enter"):
+            platform_os.tap_key("enter")
+            time.sleep(0.2)
+        if args.get("save_as"):
+            platform_os.send_hotkey(mod, "s")
+            time.sleep(1.0)
+            platform_os.type_text(args["save_as"], newline="enter")
+            platform_os.tap_key("enter")
+            time.sleep(0.6)
+        return tr("Ho scritto il testo in {app}.").format(app=app)
     if not winapi.input_desktop_available():
         raise ToolError(tr("Il PC è bloccato: non posso scrivere finché non viene sbloccato."))
     window = _wait_window(app, 0)
@@ -264,6 +464,9 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
     time.sleep(0.3)
     if winapi.foreground_window() != target:
         raise ToolError(tr("{app} ha perso il focus mentre scrivevo: controlla il testo.").format(app=app))
+    if args.get("press_enter"):
+        winapi.tap(winapi.VK["enter"])
+        time.sleep(0.2)
     if args.get("save_as"):
         winapi.hotkey(winapi.VK["ctrl"], winapi.VK["s"])
         time.sleep(1.2)
@@ -276,13 +479,17 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
 
 def read_screen(ctx: ToolContext, args: dict) -> str:
     if not screen.ocr_available():
-        raise ToolError(tr("Il riconoscimento del testo di Windows non è disponibile."))
+        raise ToolError(tr("Il riconoscimento del testo sullo schermo non è disponibile."))
     region = None
     if args.get("app"):
         windows = _matching_windows(args["app"])
         if not windows:
             raise ToolError(tr("Non vedo finestre di '{value}'.").format(value=args['app']))
-        region = winapi.window_rect(windows[0].hwnd)
+        if sys.platform == "win32":
+            region = winapi.window_rect(windows[0].hwnd)
+        else:
+            platform_os.unix_focus_window(windows[0].hwnd, windows[0].class_name)
+            time.sleep(0.25)
     lines = screen.read_text(region)
     text = "\n".join(line.text for line in lines)
     if not text.strip():
@@ -294,6 +501,23 @@ def click_text(ctx: ToolContext, args: dict) -> str:
     wanted = args["text"].strip()
     if not wanted:
         raise ToolError(tr("Cosa devo cliccare?"))
+    if not screen.ocr_available():
+        raise ToolError(tr("Il riconoscimento del testo sullo schermo non è disponibile."))
+    if sys.platform != "win32":
+        region = None
+        if args.get("app"):
+            windows = _matching_windows(args["app"])
+            if not windows:
+                raise ToolError(tr("Non vedo finestre di '{value}'.").format(value=args['app']))
+            platform_os.unix_focus_window(windows[0].hwnd, windows[0].class_name)
+            time.sleep(0.35)
+        found = screen.find_text(screen.read_text(region), wanted, threshold=0.8)
+        if found is None:
+            raise ToolError(tr("Non vedo «{wanted}» sullo schermo.").format(wanted=wanted))
+        _score, line, (x, y) = found
+        platform_os.click_mouse(x, y, double=bool(args.get("double")), right=bool(args.get("right")))
+        time.sleep(0.5)
+        return tr("Ho cliccato su «{value}».").format(value=line.text[:60])
     if not winapi.input_desktop_available():
         raise ToolError(tr("Il PC è bloccato."))
     region = None
@@ -427,6 +651,18 @@ def run_powershell(ctx: ToolContext, args: dict) -> str:
         raise ToolError(tr("Comando vuoto."))
     if len(command) > 4000:
         raise ToolError(tr("Comando troppo lungo."))
+    if sys.platform != "win32":
+        log.info("unix shell: %d characters", len(command))
+        try:
+            rc, out, err = platform_os.run_unix_shell(command, _home(), timeout=60)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ToolError(tr("Il comando ha impiegato più di 60 secondi ed è stato interrotto.")) from exc
+        text = out[:READ_LIMIT] or tr("(nessun output)")
+        if rc != 0:
+            raise ToolError(tr("Il comando è fallito (codice {returncode}): {value}").format(returncode=rc, value=(err or out)[:1500]))
+        return text + (tr("\n[avvisi: {value}]").format(value=err[:500]) if err else "")
     if _DANGEROUS.search(command):
         raise ToolError(tr("Questo comando può danneggiare il PC o i dati: non lo eseguo. Fallo tu se sei sicuro."))
     log.info("powershell: %d characters", len(command))
@@ -474,19 +710,45 @@ TOOLS = [
     ),
     Tool(
         "file_action",
-        "Rinomina, sposta, copia o cestina (nel Cestino, recuperabile) un file o una cartella dell'utente.",
+        "Rinomina, sposta, copia, cestina, apre, comprime (zip) o estrae (unzip) un file o una cartella.",
         params(
             {
-                "action": {"type": "string", "enum": ["rename", "move", "copy", "delete"]},
+                "action": {"type": "string", "enum": ["rename", "move", "copy", "delete", "zip", "unzip", "open"]},
                 "name": {"type": "string", "description": "file o cartella, es. foto.png"},
                 "folder": {"type": "string", "description": "dove si trova: desktop (default), documenti… o un percorso"},
-                "new_name": {"type": "string", "description": "per rename"},
-                "destination": {"type": "string", "description": "cartella di arrivo, per move e copy"},
+                "new_name": {"type": "string", "description": "per rename o zip"},
+                "destination": {"type": "string", "description": "cartella di arrivo, per move, copy, zip, unzip"},
             },
             ["action", "name"],
         ),
         file_action,
         timeout=120,
+    ),
+    Tool(
+        "find_files",
+        "Cerca file o cartelle nelle cartelle dell'utente per nome o estensione (open=true per aprire il primo).",
+        params(
+            {
+                "query": {"type": "string", "description": "nome o estensione, es. relazione, .pdf"},
+                "folder": {"type": "string", "description": "cartella opzionale dove cercare"},
+                "open": {"type": "boolean"},
+            },
+            ["query"],
+        ),
+        find_files,
+    ),
+    Tool(
+        "notes",
+        "Note rapide e liste (es. spesa, cose da fare): action=add, list, remove, clear.",
+        params(
+            {
+                "action": {"type": "string", "enum": ["add", "list", "remove", "clear"]},
+                "text": {"type": "string"},
+                "category": {"type": "string", "description": "es. spesa, lavoro, generale"},
+            },
+            ["action"],
+        ),
+        notes_tool,
     ),
     Tool(
         "wait",
@@ -510,12 +772,13 @@ TOOLS = [
     Tool(
         "write_in_app",
         "Apre (o usa) un'app e ci scrive un testo: Blocco note, Word, WhatsApp, chat, editor… "
-        "new_document=true per un documento nuovo (Ctrl+N), save_as=nome per salvarlo.",
+        "new_document=true per nuovo documento, press_enter=true per inviare, save_as=nome.",
         params(
             {
                 "app": {"type": "string"},
                 "text": {"type": "string"},
                 "new_document": {"type": "boolean"},
+                "press_enter": {"type": "boolean"},
                 "save_as": {"type": "string"},
             },
             ["app", "text"],

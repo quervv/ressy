@@ -144,7 +144,11 @@ class LocalWhisper:
         out = []
         for seg in segments:
             text = str(seg.text or "").strip()
-            if not text or text.startswith("[") and text.endswith("]"):
+            if not text:
+                continue
+            if (text.startswith("[") and text.endswith("]")) or (text.startswith("(") and text.endswith(")")) or (
+                text.startswith("*") and text.endswith("*") and len(text) > 2
+            ):
                 continue
             p = getattr(seg, "probability", float("nan"))
             logprob = math.log(max(p, 1e-6)) if p == p else -0.3

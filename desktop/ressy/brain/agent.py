@@ -15,17 +15,27 @@ from .prompts import system_prompt
 
 log = logging.getLogger("ressy.brain")
 
-MAX_STEPS = 6
-MAX_CALLS_PER_STEP = 4
+MAX_STEPS = 10
+MAX_CALLS_PER_STEP = 6
 _INVISIBLE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in (
     (0x200B, 0x200F), (0x2028, 0x202E), (0x2060, 0x2064), (0xFEFF, 0xFEFF))) + "]")
 
-LOOKING = frozenset({"list_windows", "read_screen", "list_folder", "read_file", "system_status", "api_usage"})
-PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder"})
-ONCE = frozenset({"send_discord_message", "write_in_app", "reminder"})
+LOOKING = frozenset({
+    "list_windows", "read_screen", "list_folder", "read_file", "system_status",
+    "api_usage", "find_files", "read_webpage", "read_discord_chat",
+})
+DATA_TOOLS = LOOKING | frozenset({"weather", "web_answer", "clipboard", "notes", "system_control"})
+PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder", "window_action"})
+ONCE = frozenset({"send_discord_message", "write_in_app", "reminder", "compose_email"})
 _OPENING = re.compile(
     r"^\W*(?:apri\w*|avvia\w*|lancia\w*|esegui\w*|vai\b|porta\w*|passa\b|torna\b|open|launch|start|run|go|switch|"
     r"bring|focus)", re.IGNORECASE)
+_MORE_THAN_OPEN = re.compile(
+    r"\b(?:scriv\w*|mand\w*|invi\w*|clicca\w*|leggi\w*|cerca\w*|crea\w*|copia\w*|incolla\w*|salva\w*|"
+    r"sinistra|destra|schermo intero|primo piano|write|send|click|read|search|create|copy|paste|save|"
+    r"left|right|fullscreen)\b",
+    re.IGNORECASE,
+)
 
 StepHook = Callable[[int, int, str], None]
 
@@ -55,6 +65,7 @@ class _Call:
 class _StepOutcome:
     status: str
     answer: str = ""
+    context: str = ""
 
 
 @dataclass
@@ -264,18 +275,27 @@ class Brain:
             fast = await self._quick_answer(step.text, turn)
             if fast is not None:
                 return _StepOutcome("done", fast)
-        note = step.text if self._on_pc() else self._step_note(step, index, total, outcomes)
+        note = self._step_note(step, index, total, outcomes, compact=self._on_pc())
         messages = self._messages(turn.ctx.channel, note)
         return await self._step_loop(messages, step, turn)
 
     def _step_note(self, step: planner.Step, index: int, total: int,
-                   outcomes: list[tuple[planner.Step, _StepOutcome]]) -> str:
+                   outcomes: list[tuple[planner.Step, _StepOutcome]], *, compact: bool = False) -> str:
         done = []
         for number, (previous, outcome) in enumerate(outcomes, 1):
             if outcome.status == "done":
-                done.append(f"{number}) {previous.text} → {outcome.answer or tr('fatto')}")
+                info = outcome.context or outcome.answer or tr("fatto")
+                if len(info) > 400:
+                    info = info[:397] + "…"
+                done.append(f"{number}) {previous.text} → {info}")
             elif outcome.status == "failed":
                 done.append(f"{number}) {previous.text} → " + tr("non riuscito: ") + (outcome.answer or "?"))
+        if compact:
+            lines = []
+            if done:
+                lines.append(tr("Già fatto:") + " " + "; ".join(done))
+            lines.append(tr("Ora fai solo l'azione {index}: {step}").format(index=index, step=step.text))
+            return "\n".join(lines)
         lines = [tr("La richiesta ha {total} azioni: le fai una alla volta, in ordine.").format(total=total)]
         if done:
             lines.append(tr("Già fatto:") + " " + "; ".join(done))
@@ -288,31 +308,37 @@ class Brain:
         tools = self.registry.schemas(turn.ctx.channel)
         models = self._models()
         last: _Call | None = None
+        gathered: list[str] = []
         for round_ in range(MAX_CALLS_PER_STEP):
             result = await self.llm.chat(messages, models=models, tools=tools, tool_choice="auto")
             message = result.message
             calls = message.get("tool_calls") or []
             if not calls:
                 answer = clean_answer(str(message.get("content") or ""))
+                ctx_text = "\n".join(gathered)[:900]
                 if last is None:
-                    return _StepOutcome("asked" if answer.endswith("?") else "done", answer)
-                return _StepOutcome("done" if last.ok else "failed", answer or last.text)
+                    return _StepOutcome("asked" if answer.endswith("?") else "done", answer, ctx_text)
+                return _StepOutcome("done" if last.ok else "failed", answer or last.text, ctx_text)
             ran = [c for c in await self._run_calls(message, calls, messages, turn, round_) if c.ran]
+            for c in ran:
+                if c.ok and c.name in DATA_TOOLS and c.text:
+                    gathered.append(c.text)
             if ran:
                 last = ran[-1]
             if ran and all(c.ok for c in ran) and self._step_finished(step.text, ran):
-                return _StepOutcome("done", " ".join(quick.spoken(c.name, c.text) for c in ran))
+                ctx_text = "\n".join(gathered)[:900]
+                return _StepOutcome("done", " ".join(quick.spoken(c.name, c.text) for c in ran), ctx_text)
         result = await self.llm.chat(messages, models=models, tools=tools, tool_choice="none")
         answer = clean_answer(str(result.message.get("content") or ""))
         ok = last is not None and last.ok
-        return _StepOutcome("done" if ok else "failed", answer or (last.text if last else ""))
+        return _StepOutcome("done" if ok else "failed", answer or (last.text if last else ""), "\n".join(gathered)[:900])
 
     @staticmethod
     def _step_finished(step_text: str, ran: list[_Call]) -> bool:
         names = {c.name for c in ran}
         if names <= LOOKING:
             return False
-        if names <= PREPARING | LOOKING and not _OPENING.match(step_text):
+        if names <= PREPARING | LOOKING and (not _OPENING.match(step_text) or _MORE_THAN_OPEN.search(step_text)):
             return False
         return True
 

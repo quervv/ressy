@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 INCLUDE = [
-    "README.md", "LICENSE", ".gitignore",
+    "README.md", "LICENSE", ".gitignore", ".github/workflows",
     "desktop/ressy", "desktop/installer", "desktop/scripts", "desktop/tests",
     "desktop/requirements.txt", "desktop/requirements-dev.txt",
     "server/ressy_server", "server/tests", "server/Dockerfile", "server/.dockerignore", "server/.env.example",
@@ -23,7 +23,7 @@ SITE = ["web"]
 SITE_EXTRA = {
     "README.md": (
         "# ressy-web\n\n"
-        "Il sito di [Ressy](https://github.com/quervv/ressy), l'assistente vocale per Windows: https://ressy.top\n\n"
+        "Il sito di [Ressy](https://github.com/quervv/ressy), l'assistente vocale per Windows, macOS e Linux: https://ressy.top\n\n"
         "Pagine statiche più tre Vercel Functions in `api/admin/` per la pagina `/admin` (metriche del sito).\n\n"
         "## Variabili d'ambiente (Vercel)\n\n"
         "| Nome | Serve per |\n|---|---|\n"

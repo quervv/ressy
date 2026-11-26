@@ -5,13 +5,14 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..speech.textnorm import normalize, similarity
-from . import winapi
+from . import platform_os, winapi
 from .registry import Tool, ToolContext, ToolError, params
 from ..i18n import tr
 
@@ -22,6 +23,7 @@ MAX_AGE_S = 6 * 3600
 
 ALIASES: dict[str, list[str]] = {
     "chrome": ["Google Chrome"],
+    "cromo": ["Google Chrome"],
     "google": ["Google Chrome"],
     "edge": ["Microsoft Edge"],
     "firefox": ["Firefox", "Mozilla Firefox"],
@@ -35,6 +37,7 @@ ALIASES: dict[str, list[str]] = {
     "outlook": ["Outlook", "Outlook (new)"],
     "teams": ["Microsoft Teams", "Teams"],
     "blocco note": ["Blocco note", "Notepad"],
+    "blocconote": ["Blocco note", "Notepad"],
     "notepad": ["Blocco note", "Notepad"],
     "calcolatrice": ["Calcolatrice", "Calculator"],
     "calculator": ["Calcolatrice", "Calculator"],
@@ -42,6 +45,7 @@ ALIASES: dict[str, list[str]] = {
     "settings": ["Impostazioni", "Settings"],
     "esplora file": ["Esplora file", "File Explorer"],
     "esplora risorse": ["Esplora file", "File Explorer"],
+    "gestione risorse": ["Esplora file", "File Explorer"],
     "file explorer": ["Esplora file", "File Explorer"],
     "gestione attivita": ["Gestione attività", "Task Manager"],
     "task manager": ["Gestione attività", "Task Manager"],
@@ -50,6 +54,21 @@ ALIASES: dict[str, list[str]] = {
     "prompt dei comandi": ["Prompt dei comandi", "Command Prompt"],
     "telegram": ["Telegram Desktop", "Telegram"],
     "whatsapp": ["WhatsApp"],
+    "uozzap": ["WhatsApp"],
+    "wazzap": ["WhatsApp"],
+    "discord": ["Discord", "Discord Canary", "Discord PTB"],
+    "discorso": ["Discord", "Discord Canary", "Discord PTB"],
+    "discordia": ["Discord", "Discord Canary", "Discord PTB"],
+    "discordo": ["Discord", "Discord Canary", "Discord PTB"],
+    "capcut": ["CapCut"],
+    "cap cut": ["CapCut"],
+    "capcat": ["CapCut"],
+    "davinci": ["DaVinci Resolve"],
+    "davinci resolve": ["DaVinci Resolve"],
+    "resolve": ["DaVinci Resolve"],
+    "spotify": ["Spotify"],
+    "spotifai": ["Spotify"],
+    "spotifi": ["Spotify"],
     "obs": ["OBS Studio"],
     "store": ["Microsoft Store"],
     "foto": ["Foto", "Photos"],
@@ -94,7 +113,15 @@ PROCESS_ALIASES: dict[str, list[str]] = {
     "vscode": ["code.exe"],
     "visual studio code": ["code.exe"],
     "discord": ["discord.exe", "discordptb.exe", "discordcanary.exe"],
+    "discord canary": ["discordcanary.exe"],
+    "discord ptb": ["discordptb.exe"],
+    "discorso": ["discord.exe", "discordptb.exe", "discordcanary.exe"],
+    "capcut": ["capcut.exe", "capcut"],
+    "cap cut": ["capcut.exe", "capcut"],
+    "davinci": ["resolve.exe", "resolve"],
+    "davinci resolve": ["resolve.exe", "resolve"],
     "spotify": ["spotify.exe"],
+    "spotifai": ["spotify.exe"],
     "telegram": ["telegram.exe"],
     "whatsapp": ["whatsapp.exe", "whatsapp.root.exe"],
     "steam": ["steam.exe", "steamwebhelper.exe"],
@@ -333,24 +360,27 @@ class AppIndex:
         if not self._refreshing.acquire(blocking=False):
             return len(self._apps)
         try:
-            try:
-                apps = self._query_start_apps()
-            except Exception:
-                log.warning("Get-StartApps failed, scanning the Start menu folders", exc_info=True)
-                apps = []
-            if not apps:
-                apps = self._scan_start_menu()
-            known = {a.norm for a in apps}
-            for source in (installed_games, scan_shortcuts):
+            if sys.platform != "win32":
+                apps = [AppEntry(name, target) for name, target in platform_os.find_unix_apps()]
+            else:
                 try:
-                    extra = source()
+                    apps = self._query_start_apps()
                 except Exception:
-                    log.debug("app source failed (%s)", source.__name__, exc_info=True)
-                    continue
-                for entry in extra:
-                    if entry.norm and entry.norm not in known:
-                        known.add(entry.norm)
-                        apps.append(entry)
+                    log.warning("Get-StartApps failed, scanning the Start menu folders", exc_info=True)
+                    apps = []
+                if not apps:
+                    apps = self._scan_start_menu()
+                known = {a.norm for a in apps}
+                for source in (installed_games, scan_shortcuts):
+                    try:
+                        extra = source()
+                    except Exception:
+                        log.debug("app source failed (%s)", source.__name__, exc_info=True)
+                        continue
+                    for entry in extra:
+                        if entry.norm and entry.norm not in known:
+                            known.add(entry.norm)
+                            apps.append(entry)
             if apps:
                 with self._lock:
                     self._apps = apps
@@ -388,10 +418,10 @@ class AppIndex:
 
     def find(self, query: str) -> tuple[AppEntry | None, list[AppEntry]]:
         results = self.search(query)
-        if not results:
-            if time.time() - self._loaded_at > 60:
-                self.refresh()
-                results = self.search(query)
+        best_score = results[0][0] if results else 0.0
+        if best_score < 0.72 and time.time() - self._loaded_at > 60:
+            self.refresh()
+            results = self.search(query)
         if not results:
             return None, []
         best_score, best = results[0]
@@ -402,6 +432,9 @@ class AppIndex:
 
 def launch(entry: AppEntry) -> None:
     target = entry.app_id
+    if sys.platform != "win32":
+        platform_os.launch_unix_target(target)
+        return
     if target.lower().endswith((".lnk", ".url", ".exe")) and os.path.isfile(target):
         os.startfile(target)
         return
@@ -417,6 +450,23 @@ def launch(entry: AppEntry) -> None:
 
 
 def _launch_builtin(query: str) -> str | None:
+    if sys.platform != "win32":
+        mac_builtins = {
+            "calcolatrice": "Calculator", "calculator": "Calculator",
+            "impostazioni": "System Settings", "settings": "System Settings",
+            "blocco note": "TextEdit", "blocconote": "TextEdit", "notepad": "TextEdit",
+            "terminale": "Terminal", "terminal": "Terminal",
+        }
+        linux_builtins = {
+            "calcolatrice": "gnome-calculator", "calculator": "gnome-calculator",
+            "terminale": "x-terminal-emulator", "terminal": "x-terminal-emulator",
+            "impostazioni": "gnome-control-center", "settings": "gnome-control-center",
+        }
+        table = mac_builtins if sys.platform == "darwin" else linux_builtins
+        cmd = table.get(normalize(query))
+        if cmd:
+            platform_os.launch_unix_target(cmd)
+        return cmd
     command = BUILTINS.get(normalize(query))
     if command is None:
         return None
@@ -428,6 +478,15 @@ def _matching_windows(name: str) -> list[winapi.Window]:
     q = normalize(name)
     if not q:
         return []
+    if sys.platform != "win32":
+        q_tokens = q.split()
+        out: list[winapi.Window] = []
+        for item in platform_os.unix_top_windows():
+            pnorm = normalize(str(item.get("process") or ""))
+            tnorm = normalize(str(item.get("title") or ""))
+            if pnorm == q or similarity(pnorm.replace(" ", ""), q.replace(" ", "")) >= 0.85 or all(t in tnorm.split() for t in q_tokens):
+                out.append(winapi.Window(hwnd=int(item["handle"]), title=str(item["title"]), pid=int(item["pid"]), class_name=str(item["process"])))
+        return out
     exe_names = {e.lower() for e in PROCESS_ALIASES.get(q, [])}
     q_tokens = q.split()
     matches: list[winapi.Window] = []
@@ -455,6 +514,8 @@ READY_AGAIN_S = 4.0
 
 
 def _real_window(window: winapi.Window) -> bool:
+    if sys.platform != "win32":
+        return "updater" not in window.title.lower()
     width, height = winapi.window_size(window.hwnd)
     return width >= 240 and height >= 160 and "updater" not in window.title.lower()
 
@@ -464,6 +525,15 @@ def wait_until_ready(name: str, before: set[int], timeout: float = READY_TIMEOUT
     while True:
         windows = [w for w in _matching_windows(name) if _real_window(w)]
         fresh = [w for w in windows if w.hwnd not in before]
+        if sys.platform != "win32":
+            if fresh:
+                return fresh[0]
+            if windows:
+                return windows[0]
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.35)
+            continue
         front = winapi.foreground_window()
         ready = fresh[0] if fresh else next((w for w in windows if w.hwnd == front), None)
         if ready is not None:
@@ -478,6 +548,10 @@ def _bring_up(name: str, before: set[int], timeout: float) -> bool:
     window = wait_until_ready(name, before, timeout)
     if window is None:
         return False
+    if sys.platform != "win32":
+        platform_os.unix_focus_window(window.hwnd, window.class_name)
+        time.sleep(0.3)
+        return True
     if winapi.input_desktop_available() and winapi.foreground_window() != window.hwnd:
         winapi.focus_window(window.hwnd)
     time.sleep(0.5)
@@ -526,19 +600,29 @@ def close_app(ctx: ToolContext, args: dict) -> str:
         raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=name))
 
     own = os.getpid()
-    for window in windows:
-        winapi.close_window(window.hwnd)
-    if not force:
-        time.sleep(1.5)
-        still = [w for w in windows if winapi.user32.IsWindow(w.hwnd) and winapi.user32.IsWindowVisible(w.hwnd)]
-        if still:
-            return (
-                tr("Ho chiesto a {name} di chiudersi, ma {len} finestra/e è ancora aperta (forse chiede di salvare). Posso forzare la chiusura se vuoi, perdendo le modifiche non salvate.").format(name=name, len=len(still))
-            )
-        alive = [pid for pid in pids if psutil.pid_exists(pid)]
-        if alive:
-            return tr("Ho chiuso le finestre di {name}; il programma resta attivo in background (area di notifica).").format(name=name)
-        return tr("Ho chiuso {name}.").format(name=name)
+    if sys.platform != "win32":
+        for window in windows:
+            platform_os.unix_close_window(window.hwnd, window.class_name)
+        if not force:
+            time.sleep(1.2)
+            still = [w for w in _matching_windows(name)]
+            if still:
+                return tr("Ho chiesto a {name} di chiudersi, ma {len} finestra/e è ancora aperta (forse chiede di salvare). Posso forzare la chiusura se vuoi, perdendo le modifiche non salvate.").format(name=name, len=len(still))
+            return tr("Ho chiuso {name}.").format(name=name)
+    else:
+        for window in windows:
+            winapi.close_window(window.hwnd)
+        if not force:
+            time.sleep(1.5)
+            still = [w for w in windows if winapi.user32.IsWindow(w.hwnd) and winapi.user32.IsWindowVisible(w.hwnd)]
+            if still:
+                return (
+                    tr("Ho chiesto a {name} di chiudersi, ma {len} finestra/e è ancora aperta (forse chiede di salvare). Posso forzare la chiusura se vuoi, perdendo le modifiche non salvate.").format(name=name, len=len(still))
+                )
+            alive = [pid for pid in pids if psutil.pid_exists(pid)]
+            if alive:
+                return tr("Ho chiuso le finestre di {name}; il programma resta attivo in background (area di notifica).").format(name=name)
+            return tr("Ho chiuso {name}.").format(name=name)
 
     killed = 0
     for pid in pids:
@@ -559,6 +643,11 @@ def close_app(ctx: ToolContext, args: dict) -> str:
 
 
 def list_windows(ctx: ToolContext, args: dict) -> str:
+    if sys.platform != "win32":
+        wins = platform_os.unix_top_windows()
+        if not wins:
+            return tr("Non ci sono finestre aperte.")
+        return tr("Finestre aperte:\n") + "\n".join(f"{w['process']}: {w['title'][:80]}" for w in wins[:25])
     windows = winapi.top_windows()
     if not windows:
         return tr("Non ci sono finestre aperte.")
@@ -566,16 +655,139 @@ def list_windows(ctx: ToolContext, args: dict) -> str:
     return tr("Finestre aperte:\n") + "\n".join(lines)
 
 
+def _pick_target_window(app_name: str = "") -> winapi.Window:
+    if app_name.strip():
+        windows = _matching_windows(app_name)
+        real = [w for w in windows if _real_window(w)]
+        chosen = real[0] if real else (windows[0] if windows else None)
+        if chosen is None:
+            raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=app_name))
+        return chosen
+    if sys.platform != "win32":
+        wins = platform_os.unix_top_windows()
+        front_item = next((w for w in wins if w.get("front")), wins[0] if wins else None)
+        if front_item is None:
+            raise ToolError(tr("Non c'è nessuna finestra attiva."))
+        return winapi.Window(hwnd=int(front_item["handle"]), title=str(front_item["title"]), pid=int(front_item["pid"]), class_name=str(front_item["process"]))
+    hwnd = winapi.foreground_window()
+    if not hwnd:
+        raise ToolError(tr("Non c'è nessuna finestra attiva."))
+    title = winapi.window_title(hwnd) or tr("la finestra attiva")
+    return winapi.Window(hwnd=hwnd, title=title, pid=winapi.window_pid(hwnd), class_name=winapi.window_class(hwnd))
+
+
 def focus_app(ctx: ToolContext, args: dict) -> str:
     name = args["name"].strip()
     windows = _matching_windows(name)
     if not windows:
         raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=name))
+    if sys.platform != "win32":
+        target = windows[0]
+        if platform_os.unix_focus_window(target.hwnd, target.class_name):
+            return tr("Ho portato in primo piano {value}.").format(value=target.title[:60])
+        raise ToolError(tr("Windows non mi ha permesso di portare la finestra in primo piano."))
     if not winapi.input_desktop_available():
         raise ToolError(tr("Il PC è bloccato: non posso cambiare finestra finché non viene sbloccato."))
-    if winapi.focus_window(windows[0].hwnd):
-        return tr("Ho portato in primo piano {value}.").format(value=windows[0].title[:60])
+    real = [w for w in windows if _real_window(w)]
+    front = winapi.foreground_window()
+    ordered = real or windows
+    target = ordered[1] if len(ordered) > 1 and ordered[0].hwnd == front else ordered[0]
+    if winapi.focus_window(target.hwnd):
+        return tr("Ho portato in primo piano {value}.").format(value=target.title[:60])
     raise ToolError(tr("Windows non mi ha permesso di portare la finestra in primo piano."))
+
+
+def window_action(ctx: ToolContext, args: dict) -> str:
+    action = args["action"]
+    app_name = (args.get("app") or "").strip()
+    if sys.platform != "win32":
+        if action == "switch_next":
+            platform_os.send_hotkey("cmd" if sys.platform == "darwin" else "alt", "tab")
+            return tr("Sono passata alla finestra precedente.")
+        if action == "minimize_all":
+            if sys.platform == "darwin":
+                platform_os.send_hotkey("f11")
+            else:
+                platform_os.send_hotkey("super", "d")
+            return tr("Ho mostrato il desktop riducendo a icona le finestre.")
+        window = _pick_target_window(app_name)
+        label = window.title[:50] or app_name or tr("la finestra")
+        platform_os.unix_focus_window(window.hwnd, window.class_name)
+        if action == "minimize":
+            if sys.platform == "darwin":
+                platform_os.send_hotkey("cmd", "m")
+            else:
+                platform_os.send_hotkey("alt", "f9")
+            return tr("Ho ridotto a icona {label}.").format(label=label)
+        if action == "maximize":
+            if sys.platform == "darwin":
+                platform_os.send_hotkey("ctrl", "cmd", "f")
+            else:
+                platform_os.send_hotkey("super", "up")
+            return tr("Ho ingrandito {label}.").format(label=label)
+        if action == "fullscreen":
+            if sys.platform == "darwin":
+                platform_os.send_hotkey("ctrl", "cmd", "f")
+            else:
+                platform_os.tap_key("f11")
+            return tr("Ho attivato o tolto lo schermo intero su {label}.").format(label=label)
+        if action == "snap_left":
+            platform_os.send_hotkey("super" if sys.platform != "darwin" else "ctrl", "left")
+            return tr("Ho affiancato {label} a sinistra.").format(label=label)
+        if action == "snap_right":
+            platform_os.send_hotkey("super" if sys.platform != "darwin" else "ctrl", "right")
+            return tr("Ho affiancato {label} a destra.").format(label=label)
+        return tr("Ho ripristinato {label}.").format(label=label)
+    if not winapi.input_desktop_available():
+        raise ToolError(tr("Il PC è bloccato: non posso gestire le finestre finché non viene sbloccato."))
+    if action == "minimize_all":
+        winapi.wait_modifiers_released()
+        winapi.hotkey(winapi.VK["win"], winapi.VK["d"])
+        return tr("Ho mostrato il desktop riducendo a icona le finestre.")
+    if action == "switch_next":
+        winapi.wait_modifiers_released()
+        winapi.hotkey(winapi.VK["alt"], winapi.VK["tab"])
+        return tr("Sono passata alla finestra precedente.")
+
+    window = _pick_target_window(app_name)
+    label = window.title[:50] or app_name or tr("la finestra")
+    if action == "minimize":
+        winapi.minimize_window(window.hwnd)
+        return tr("Ho ridotto a icona {label}.").format(label=label)
+    if action == "maximize":
+        winapi.focus_window(window.hwnd)
+        winapi.maximize_window(window.hwnd)
+        return tr("Ho ingrandito {label}.").format(label=label)
+    if action == "restore":
+        winapi.restore_window(window.hwnd)
+        winapi.focus_window(window.hwnd)
+        return tr("Ho ripristinato {label}.").format(label=label)
+    if action == "always_on_top":
+        pin = not winapi.is_topmost(window.hwnd)
+        winapi.set_topmost(window.hwnd, pin)
+        if pin:
+            return tr("Tengo sempre in primo piano {label}.").format(label=label)
+        return tr("{label} non è più fissata in primo piano.").format(label=label)
+    if action in ("snap_left", "snap_right"):
+        if not winapi.focus_window(window.hwnd):
+            raise ToolError(tr("Non riesco a portare {label} in primo piano.").format(label=label))
+        winapi.wait_modifiers_released()
+        time.sleep(0.15)
+        arrow = "left" if action == "snap_left" else "right"
+        winapi.hotkey(winapi.VK["win"], winapi.VK[arrow])
+        time.sleep(0.25)
+        winapi.tap(winapi.VK["esc"])
+        if action == "snap_left":
+            return tr("Ho affiancato {label} a sinistra.").format(label=label)
+        return tr("Ho affiancato {label} a destra.").format(label=label)
+    if action == "fullscreen":
+        if not winapi.focus_window(window.hwnd):
+            raise ToolError(tr("Non riesco a portare {label} in primo piano.").format(label=label))
+        winapi.wait_modifiers_released()
+        time.sleep(0.15)
+        winapi.tap(winapi.VK["f11"])
+        return tr("Ho attivato o tolto lo schermo intero su {label}.").format(label=label)
+    raise ToolError(tr("Azione finestra non valida."))
 
 
 TOOLS = [
@@ -602,6 +814,27 @@ TOOLS = [
         "Porta in primo piano la finestra di un programma già aperto.",
         params({"name": {"type": "string"}}, ["name"]),
         focus_app,
+        snapshot_on_error=True,
+        uses_screen=True,
+    ),
+    Tool(
+        "window_action",
+        "Gestisce le finestre per il multitasking: minimize, maximize, restore, snap_left, snap_right, "
+        "minimize_all, always_on_top, fullscreen, switch_next.",
+        params(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "minimize", "maximize", "restore", "snap_left", "snap_right",
+                        "minimize_all", "always_on_top", "fullscreen", "switch_next",
+                    ],
+                },
+                "app": {"type": "string", "description": "nome app (opzionale: default finestra attiva)"},
+            },
+            ["action"],
+        ),
+        window_action,
         snapshot_on_error=True,
         uses_screen=True,
     ),

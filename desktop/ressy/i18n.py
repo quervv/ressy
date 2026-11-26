@@ -39,14 +39,26 @@ def apply_saved_language() -> str:
 
 
 def system_language() -> str:
-    try:
-        import ctypes
+    import os
+    import sys
 
-        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
-        return "it" if (lang_id & 0x3FF) == 0x10 else "en"
-    except Exception:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+            return "it" if (lang_id & 0x3FF) == 0x10 else "en"
+        except Exception:
+            pass
+    for env_key in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        val = (os.environ.get(env_key) or "").lower()
+        if val.startswith(("it", "italian")):
+            return "it"
+    try:
         code = (locale.getlocale()[0] or "").lower()
         return "it" if code.startswith(("it", "italian")) else "en"
+    except Exception:
+        return "en"
 
 
 def _table() -> dict[str, str]:

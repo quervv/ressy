@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -142,15 +143,29 @@ def zip_source(target: Path) -> None:
     tmp.replace(target)
 
 
+def tar_unix(target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    with tarfile.open(tmp, "w:gz") as tf:
+        for path in source_files():
+            arc = f"ressy/{path.relative_to(REPO).as_posix()}"
+            info = tf.gettarinfo(str(path), arcname=arc)
+            info.mode = 0o755 if path.suffix == ".sh" else 0o644
+            with path.open("rb") as fh:
+                tf.addfile(info, fh)
+    tmp.replace(target)
+
+
 def main() -> None:
-    web = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO / "web"
+    web = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO / "web"
     out = web / "download"
     icon = make_icon()
     app_dir = pyinstaller(icon)
     zip_tree(app_dir, out / "Ressy-win64.zip", "Ressy")
     setup_exe(icon, out / "Ressy-win64.zip", out / "Ressy-Setup.exe")
+    tar_unix(out / "Ressy-unix.tar.gz")
     zip_source(out / "Ressy-source.zip")
-    for name in ("Ressy-Setup.exe", "Ressy-win64.zip", "Ressy-source.zip"):
+    for name in ("Ressy-Setup.exe", "Ressy-win64.zip", "Ressy-unix.tar.gz", "Ressy-source.zip"):
         size = (out / name).stat().st_size / 1_048_576
         print(f"wrote {out / name} ({size:.1f} MB)")
     shutil.rmtree(BUILD / "pyinstaller", ignore_errors=True)

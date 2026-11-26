@@ -29,6 +29,8 @@ class Reminder:
     text: str
     platform: str = ""
     user_id: str = ""
+    kind: str = "reminder"
+    command: str = ""
 
     def when(self) -> str:
         due = dt.datetime.fromtimestamp(self.due)
@@ -50,6 +52,7 @@ class ReminderService:
         self._items: dict[str, Reminder] = {}
         self._handles: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.stopwatch_started: float | None = None
 
     def _load(self) -> None:
         try:
@@ -116,8 +119,11 @@ class ReminderService:
         task = asyncio.ensure_future(self.announce(reminder, late))
         task.add_done_callback(_log_failure)
 
-    def add(self, text: str, due: float, platform: str = "", user_id: str = "") -> Reminder:
-        reminder = Reminder(secrets.token_hex(2), due, text.strip(), platform, user_id)
+    def add(
+        self, text: str, due: float, platform: str = "", user_id: str = "",
+        *, kind: str = "reminder", command: str = "",
+    ) -> Reminder:
+        reminder = Reminder(secrets.token_hex(2), due, text.strip(), platform, user_id, kind, command.strip())
         while reminder.id in self._items:
             reminder.id = secrets.token_hex(2)
         self._items[reminder.id] = reminder
@@ -206,6 +212,81 @@ async def reminder_tool(ctx: ToolContext, args: dict) -> str:
     raise ToolError(tr("Azione non valida."))
 
 
+def _format_span(seconds: float) -> str:
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(tr("{n} ore").format(n=hours) if hours != 1 else tr("1 ora"))
+    if minutes:
+        parts.append(tr("{n} minuti").format(n=minutes) if minutes != 1 else tr("1 minuto"))
+    if secs or not parts:
+        parts.append(tr("{n} secondi").format(n=secs) if secs != 1 else tr("1 secondo"))
+    return " e ".join(parts) if len(parts) <= 2 else ", ".join(parts[:-1]) + " e " + parts[-1]
+
+
+async def timer_tool(ctx: ToolContext, args: dict) -> str:
+    service: ReminderService = ctx.services.reminders
+    action = args["action"]
+    if action == "stopwatch_start":
+        service.stopwatch_started = time.monotonic()
+        return tr("Cronometro avviato.")
+    if action == "stopwatch_status":
+        if service.stopwatch_started is None:
+            return tr("Il cronometro non è avviato.")
+        elapsed = time.monotonic() - service.stopwatch_started
+        return tr("Cronometro: {span}.").format(span=_format_span(elapsed))
+    if action == "stopwatch_stop":
+        if service.stopwatch_started is None:
+            return tr("Il cronometro non è avviato.")
+        elapsed = time.monotonic() - service.stopwatch_started
+        service.stopwatch_started = None
+        return tr("Cronometro fermato a {span}.").format(span=_format_span(elapsed))
+    if action == "start":
+        seconds = float(args.get("seconds") or 0) + float(args.get("minutes") or 0) * 60.0
+        if seconds <= 0:
+            raise ToolError(tr("Indica la durata del timer (secondi o minuti)."))
+        if seconds > MAX_AHEAD_S:
+            raise ToolError(tr("Posso impostare timer al massimo per 30 giorni."))
+        command = (args.get("command") or "").strip()
+        label = (args.get("label") or "").strip() or (command or tr("Timer"))
+        due = time.time() + seconds
+        channel = ctx.channel
+        kind = "command" if command else "timer"
+        service.add(
+            label, due, channel.kind if channel.remote else "", channel.user_id if channel.remote else "",
+            kind=kind, command=command,
+        )
+        if command:
+            return tr("Eseguirò «{command}» tra {span}.").format(command=command, span=_format_span(seconds))
+        return tr("Timer impostato per {span}: {label}.").format(span=_format_span(seconds), label=label)
+    if action == "list":
+        timers = [r for r in service.list() if r.kind in ("timer", "command")]
+        if not timers:
+            return tr("Non ci sono timer attivi.")
+        now = time.time()
+        return tr("Timer attivi:\n") + "\n".join(
+            tr("[{id}] {text} (tra {span})").format(id=r.id, text=r.text, span=_format_span(max(0.0, r.due - now)))
+            for r in timers
+        )
+    if action == "cancel":
+        timers = [r for r in service.list() if r.kind in ("timer", "command")]
+        wanted_id = (args.get("id") or "").strip().lower()
+        if wanted_id:
+            removed = service.cancel(wanted_id)
+            if removed is None:
+                raise ToolError(tr("Nessun timer con codice {wanted_id}.").format(wanted_id=wanted_id))
+            return tr("Ho annullato il timer «{text}».").format(text=removed.text)
+        if not timers:
+            raise ToolError(tr("Non ci sono timer attivi da annullare."))
+        label = normalize(args.get("label") or "")
+        target = timers[0] if not label else max(timers, key=lambda r: similarity(normalize(r.text), label))
+        service.cancel(target.id)
+        return tr("Ho annullato il timer «{text}».").format(text=target.text)
+    raise ToolError(tr("Azione timer non valida."))
+
+
 TOOLS = [
     Tool(
         "reminder",
@@ -221,5 +302,24 @@ TOOLS = [
             ["action"],
         ),
         reminder_tool,
+    ),
+    Tool(
+        "timer",
+        "Timer, cronometro e azioni programmate (start con seconds/minutes + label/command, list, cancel, stopwatch_*).",
+        params(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "list", "cancel", "stopwatch_start", "stopwatch_stop", "stopwatch_status"],
+                },
+                "seconds": {"type": "number"},
+                "minutes": {"type": "number"},
+                "label": {"type": "string"},
+                "command": {"type": "string", "description": "comando da eseguire allo scadere (es. metti in pausa)"},
+                "id": {"type": "string"},
+            },
+            ["action"],
+        ),
+        timer_tool,
     ),
 ]

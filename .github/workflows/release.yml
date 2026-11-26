@@ -1,0 +1,64 @@
+name: Release Desktop (Windows, macOS, Linux)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            asset: Ressy-linux-x64.tar.gz
+            platform: linux
+          - os: macos-15
+            asset: Ressy-macos-arm64.zip
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system audio deps (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 libxcb-cursor0 espeak-ng xclip xdotool wmctrl
+
+      - name: Install system audio deps (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install portaudio
+
+      - name: Install Python dependencies & PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r desktop/requirements.txt pyinstaller
+
+      - name: Build binary
+        run: |
+          cd desktop
+          python -m PyInstaller --noconfirm --windowed --name Ressy \
+            --paths . --add-data "ressy/ui:ressy/ui" --collect-all pywhispercpp \
+            ressy/__main__.py
+
+      - name: Package asset
+        run: |
+          cd desktop/dist
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            ditto -c -k --sequesterRsrc --keepParent Ressy.app "../${{ matrix.asset }}"
+          else
+            tar -czf "../${{ matrix.asset }}" Ressy
+          fi
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/${{ matrix.asset }}

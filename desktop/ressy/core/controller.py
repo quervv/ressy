@@ -69,9 +69,13 @@ TOOL_STATUS = {
     "close_app": tr("Chiudo il programma…"),
     "list_windows": tr("Guardo le finestre aperte…"),
     "focus_app": tr("Cambio finestra…"),
+    "window_action": tr("Sistemo la finestra…"),
     "send_discord_message": tr("Scrivo su Discord…"),
+    "read_discord_chat": tr("Leggo Discord…"),
     "open_url": tr("Apro il browser…"),
-    "web_search": tr("Cerco su Google…"),
+    "web_search": tr("Cerco sul web…"),
+    "read_webpage": tr("Leggo la pagina web…"),
+    "compose_email": tr("Preparo l’email…"),
     "play_youtube": tr("Cerco su YouTube…"),
     "web_answer": tr("Cerco sul web…"),
     "media_control": tr("Controllo la musica…"),
@@ -79,14 +83,20 @@ TOOL_STATUS = {
     "take_screenshot": tr("Faccio uno screenshot…"),
     "pc_power": tr("Gestisco l’alimentazione…"),
     "system_status": tr("Controllo il PC…"),
+    "system_control": tr("Regolo le impostazioni del PC…"),
     "open_folder": tr("Apro la cartella…"),
     "type_text": tr("Scrivo…"),
     "press_keys": tr("Premo i tasti…"),
+    "mouse_action": tr("Muovo il mouse…"),
     "set_clipboard": tr("Copio negli appunti…"),
+    "clipboard": tr("Gestisco gli appunti…"),
     "reminder": tr("Gestisco i promemoria…"),
+    "timer": tr("Gestisco timer e cronometro…"),
     "create_file": tr("Creo il file…"),
     "create_folder": tr("Creo la cartella…"),
     "file_action": tr("Sistemo i file…"),
+    "find_files": tr("Cerco i file…"),
+    "notes": tr("Aggiorno le note…"),
     "wait": tr("Aspetto…"),
     "read_file": tr("Leggo il file…"),
     "list_folder": tr("Guardo nella cartella…"),
@@ -94,6 +104,7 @@ TOOL_STATUS = {
     "read_screen": tr("Guardo lo schermo…"),
     "click_text": tr("Clicco…"),
     "weather": tr("Guardo il meteo…"),
+    "edit_video": tr("Edito il video…"),
     "run_powershell": tr("Eseguo un comando…"),
 }
 
@@ -144,6 +155,12 @@ class WakeJob:
     pass
 
 
+@dataclass
+class ScheduledJob:
+    reminder: Reminder
+    late: bool
+
+
 def error_text(exc: BaseException) -> str:
     name = getattr(exc, "provider", "") or "Groq"
     if isinstance(exc, GroqError) and name == "PC":
@@ -181,7 +198,7 @@ class Controller:
         self.speaker = Speaker(settings, self.player)
         self.apps = AppIndex(app_dir() / "apps.json")
         self.reminders = ReminderService(app_dir() / "reminders.json", self._announce_reminder)
-        self.services = Services(settings, self.llm, self.apps, self.reminders)
+        self.services = Services(settings, self.llm, self.apps, self.reminders, ui=self.ui, stt=self.stt)
         self.brain = Brain(settings, self.llm, build_registry(), self.services)
         self.remote = RemoteClient(settings, self._on_remote_command, self._on_remote_event)
         self.bot = LocalBot(settings, on_error=self.remote.block)
@@ -197,6 +214,8 @@ class Controller:
             on_start=lambda: self.runner.call(self._on_vad_start),
             on_utterance=lambda pcm: self.runner.call(self._on_vad_utterance, pcm),
             on_discard=lambda: self.runner.call(self._on_vad_discard),
+            end_silence_ms=1150,
+            max_utterance_ms=30000,
         )
         self.ptt = PushToTalkBuffer(max_seconds=int(PTT_MAX_S))
         self._preroll: deque[tuple[float, np.ndarray]] = deque(maxlen=PREROLL_FRAMES)
@@ -539,6 +558,8 @@ class Controller:
                     await self._handle_remote(job)
                 elif isinstance(job, AnnounceJob):
                     await self._handle_announce(job)
+                elif isinstance(job, ScheduledJob):
+                    await self._handle_scheduled(job)
                 elif isinstance(job, WakeJob):
                     if not self.awake:
                         await self._wake_up()
@@ -784,10 +805,18 @@ class Controller:
             self.ui.pair_code(data)
 
     async def _announce_reminder(self, reminder: Reminder, late: bool) -> None:
-        text = tr("Promemoria: {text}").format(text=reminder.text)
+        if getattr(reminder, "command", ""):
+            self._enqueue(ScheduledJob(reminder, late))
+            return
+        if getattr(reminder, "kind", "reminder") == "timer":
+            text = tr("Timer scaduto: {text}.").format(text=reminder.text)
+            title = tr("Timer")
+        else:
+            text = tr("Promemoria: {text}").format(text=reminder.text)
+            title = tr("Promemoria")
         if late:
             text += tr(" (in ritardo: il PC era spento o in sospensione)")
-        self.ui.toast(tr("Promemoria"), reminder.text)
+        self.ui.toast(title, reminder.text)
         if reminder.platform:
             delivered = await self.remote.notify(
                 "⏰ " + text, target={"platform": reminder.platform, "user_id": reminder.user_id}
@@ -795,6 +824,36 @@ class Controller:
             if delivered:
                 return
         self._enqueue(AnnounceJob(text))
+
+    async def _handle_scheduled(self, job: ScheduledJob) -> None:
+        reminder = job.reminder
+        if job.late:
+            msg = tr("Azione programmata saltata (il PC era spento): {command}").format(command=reminder.command)
+            if reminder.platform:
+                await self.remote.notify("⏰ " + msg, target={"platform": reminder.platform, "user_id": reminder.user_id})
+            else:
+                await self._handle_announce(AnnounceJob(msg))
+            return
+        channel = (
+            Channel(kind=reminder.platform, user_id=reminder.user_id)
+            if reminder.platform else VOICE
+        )
+        self.ui.toast(tr("Azione programmata"), reminder.command)
+        try:
+            result = await asyncio.wait_for(self.brain.respond(reminder.command, channel), timeout=VOICE_TIMEOUT_S)
+            reply_text = result.text
+        except Exception as exc:
+            reply_text = error_text(exc)
+        if reminder.platform:
+            delivered = await self.remote.notify(
+                "⏰ " + reply_text, target={"platform": reminder.platform, "user_id": reminder.user_id}
+            )
+            if delivered:
+                self._run_deferred(result.deferred if "result" in locals() else [])
+                return
+        await self._handle_announce(AnnounceJob(reply_text))
+        if "result" in locals():
+            self._run_deferred(result.deferred)
 
     async def _handle_announce(self, job: AnnounceJob) -> None:
         temporary = not self.awake

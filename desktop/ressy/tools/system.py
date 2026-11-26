@@ -4,14 +4,16 @@ import datetime as dt
 import io
 import logging
 import os
+import socket
 import subprocess
+import sys
 import time
 
-from ..paths import pictures_dir
+from ..paths import pictures_dir, user_folder
 from ..speech.textnorm import normalize, similarity
 from ..speech.wake import phonetic
-from .apps import launch
-from . import winapi
+from .apps import _matching_windows, _real_window, launch
+from . import platform_os, winapi
 from .registry import Attachment, Tool, ToolContext, ToolError, params
 from ..i18n import tr
 
@@ -30,7 +32,10 @@ MEDIA_KEYS = {
 
 def media_control(ctx: ToolContext, args: dict) -> str:
     action = args["action"]
-    winapi.tap(winapi.VK[MEDIA_KEYS[action]])
+    if sys.platform != "win32":
+        platform_os.media_action(action)
+    else:
+        winapi.tap(winapi.VK[MEDIA_KEYS[action]])
     return {
         "play_pause": tr("Ho premuto play/pausa."),
         "next": tr("Traccia successiva."),
@@ -43,6 +48,11 @@ def media_control(ctx: ToolContext, args: dict) -> str:
 def set_volume(ctx: ToolContext, args: dict) -> str:
     level = args.get("level")
     change = args.get("change")
+    if sys.platform != "win32":
+        if level is None and change not in ("up", "down", "mute"):
+            raise ToolError(tr("Indica un livello (0-100) oppure change=up/down/mute."))
+        steps = max(1, min(50, int(args.get("steps") or 5)))
+        return platform_os.unix_set_volume(level=level, change=change, steps=steps)
     up, down = winapi.VK["volume_up"], winapi.VK["volume_down"]
     if level is not None:
         level = max(0, min(100, int(level)))
@@ -72,7 +82,27 @@ def set_volume(ctx: ToolContext, args: dict) -> str:
 def take_screenshot(ctx: ToolContext, args: dict) -> str:
     from PIL import ImageGrab
 
-    image = ImageGrab.grab(all_screens=True)
+    app_name = (args.get("app") or "").strip()
+    if app_name:
+        windows = _matching_windows(app_name)
+        real = [w for w in windows if _real_window(w)]
+        target = real[0] if real else (windows[0] if windows else None)
+        if target is None:
+            raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=app_name))
+        if sys.platform != "win32":
+            platform_os.unix_focus_window(target.hwnd, target.class_name)
+            time.sleep(0.25)
+            image = ImageGrab.grab(all_screens=True)
+        else:
+            if winapi.input_desktop_available():
+                winapi.focus_window(target.hwnd)
+                time.sleep(0.25)
+            rect = winapi.window_rect(target.hwnd)
+            if rect[2] <= rect[0] or rect[3] <= rect[1]:
+                raise ToolError(tr("La finestra di {name} è ridotta a icona.").format(name=app_name))
+            image = ImageGrab.grab(bbox=rect, all_screens=True)
+    else:
+        image = ImageGrab.grab(all_screens=True)
     folder = pictures_dir()
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"screenshot-{dt.datetime.now():%Y%m%d-%H%M%S}.png"
@@ -92,6 +122,8 @@ def take_screenshot(ctx: ToolContext, args: dict) -> str:
 def pc_power(ctx: ToolContext, args: dict) -> str:
     action = args["action"]
     delay = max(0, min(3600, int(args.get("delay_seconds") if args.get("delay_seconds") is not None else 60)))
+    if sys.platform != "win32":
+        return platform_os.unix_pc_power(action, delay)
     if action == "lock":
         if not winapi.lock_workstation():
             raise ToolError(tr("Windows non ha bloccato il PC."))
@@ -121,7 +153,7 @@ def system_status(ctx: ToolContext, args: dict) -> str:
     parts = [f"CPU {cpu:.0f}%", tr("RAM {percent:.0f}% ({used:.1f} di {total:.1f} GB)").format(
         percent=memory.percent, used=memory.used / 2**30, total=memory.total / 2**30)]
     try:
-        disk = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\")
+        disk = psutil.disk_usage(platform_os.unix_system_drive())
         parts.append(tr("disco {value:.0f} GB liberi su {value2:.0f}").format(value=disk.free / 2**30, value2=disk.total / 2**30))
     except OSError:
         pass
@@ -163,7 +195,10 @@ def _folder_score(wanted: str, candidate: str) -> float:
 def find_folder(wanted: str, roots: list[str] | None = None, max_depth: int = 3,
                 budget: float = 2.0) -> tuple[str | None, list[str]]:
     if roots is None:
-        roots = [winapi.known_folder(k) for k in ("desktop", "documents", "downloads", "pictures", "music", "videos")]
+        if sys.platform == "win32":
+            roots = [winapi.known_folder(k) for k in ("desktop", "documents", "downloads", "pictures", "music", "videos")]
+        else:
+            roots = platform_os.user_home_folders()
         roots.append(os.path.expanduser("~"))
     deadline = time.monotonic() + budget
     seen: set[str] = set()
@@ -208,22 +243,22 @@ def open_folder(ctx: ToolContext, args: dict) -> str:
     if name in ("screenshot ressy", "ressy", "screenshot"):
         folder = pictures_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(folder))
+        platform_os.open_path(folder)
         return tr("Ho aperto la cartella degli screenshot di Ressy.")
     key = FOLDER_NAMES.get(name)
     if key is not None:
-        path = winapi.known_folder(key)
+        path = winapi.known_folder(key) if sys.platform == "win32" else str(user_folder(key))
         if not path or not os.path.isdir(path):
             raise ToolError(tr("Non trovo quella cartella."))
-        os.startfile(path)
+        platform_os.open_path(path)
         return tr("Ho aperto la cartella {raw_name}.").format(raw_name=raw_name)
     expanded = os.path.expandvars(os.path.expanduser(raw_name))
     if os.path.isabs(expanded) and os.path.isdir(expanded):
-        os.startfile(expanded)
-        return tr("Ho aperto la cartella {value}.").format(value=os.path.basename(expanded.rstrip(chr(92))) or expanded)
+        platform_os.open_path(expanded)
+        return tr("Ho aperto la cartella {value}.").format(value=os.path.basename(expanded.rstrip(chr(92) + "/")) or expanded)
     path, near = find_folder(raw_name)
     if path is not None:
-        os.startfile(path)
+        platform_os.open_path(path)
         return tr("Ho aperto la cartella {basename} ({dirname}).").format(basename=os.path.basename(path), dirname=os.path.dirname(path))
     apps = getattr(ctx.services, "apps", None)
     if apps is not None:
@@ -236,7 +271,7 @@ def open_folder(ctx: ToolContext, args: dict) -> str:
 
 
 def _require_desktop() -> None:
-    if not winapi.input_desktop_available():
+    if sys.platform == "win32" and not winapi.input_desktop_available():
         raise ToolError(tr("Il PC è bloccato: non posso usare la tastiera finché non viene sbloccato."))
 
 
@@ -245,9 +280,14 @@ def type_text(ctx: ToolContext, args: dict) -> str:
     if len(text) > 5000:
         raise ToolError(tr("Testo troppo lungo (massimo 5000 caratteri)."))
     _require_desktop()
-    winapi.wait_modifiers_released()
-    title = winapi.window_title(winapi.foreground_window())
-    winapi.type_text(text)
+    platform_os.wait_modifiers_released()
+    if sys.platform == "win32":
+        title = winapi.window_title(winapi.foreground_window())
+        winapi.type_text(text)
+    else:
+        wins = platform_os.unix_top_windows()
+        title = next((str(w["title"]) for w in wins if w.get("front")), "")
+        platform_os.type_text(text)
     return tr("Ho scritto il testo in «{value}».").format(value=title[:60]) if title else tr("Ho scritto il testo.")
 
 
@@ -255,6 +295,14 @@ _BLOCKED_COMBOS = ({0x11, 0x12, 0x2E},)
 
 
 def press_keys(ctx: ToolContext, args: dict) -> str:
+    if sys.platform != "win32":
+        try:
+            keys = platform_os.validate_keys(args["keys"])
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        platform_os.wait_modifiers_released()
+        platform_os.send_hotkey(*keys)
+        return tr("Ho premuto {value}.").format(value=args["keys"])
     try:
         codes = winapi.parse_keys(args["keys"])
     except ValueError as exc:
@@ -268,8 +316,233 @@ def press_keys(ctx: ToolContext, args: dict) -> str:
 
 
 def set_clipboard(ctx: ToolContext, args: dict) -> str:
-    winapi.set_clipboard_text(args["text"])
+    platform_os.set_clipboard(args["text"])
     return tr("Testo copiato negli appunti.")
+
+
+def clipboard(ctx: ToolContext, args: dict) -> str:
+    action = args["action"]
+    if action == "get":
+        text = platform_os.get_clipboard()
+        if not text:
+            return tr("Gli appunti sono vuoti (o non contengono testo).")
+        if len(text) > 4000:
+            return tr("Negli appunti c'è:\n{text}").format(text=text[:4000] + "…")
+        return tr("Negli appunti c'è:\n{text}").format(text=text)
+    if action == "set":
+        text = args.get("text") or ""
+        if not text:
+            raise ToolError(tr("Quale testo devo copiare negli appunti?"))
+        platform_os.set_clipboard(text)
+        return tr("Testo copiato negli appunti.")
+    if action == "paste":
+        _require_desktop()
+        platform_os.wait_modifiers_released()
+        platform_os.send_hotkey(platform_os.mod_key(), "v")
+        return tr("Ho incollato dagli appunti.")
+    if action == "clear":
+        platform_os.clear_clipboard()
+        return tr("Ho svuotato gli appunti.")
+    raise ToolError(tr("Azione non valida per gli appunti."))
+
+
+def mouse_action(ctx: ToolContext, args: dict) -> str:
+    action = args["action"]
+    _require_desktop()
+    app_name = (args.get("app") or "").strip()
+    x, y = args.get("x"), args.get("y")
+    if app_name:
+        windows = _matching_windows(app_name)
+        real = [w for w in windows if _real_window(w)]
+        target = real[0] if real else (windows[0] if windows else None)
+        if target is None:
+            raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=app_name))
+        if sys.platform != "win32":
+            platform_os.unix_focus_window(target.hwnd, target.class_name)
+        else:
+            winapi.focus_window(target.hwnd)
+        time.sleep(0.2)
+        if (x is None or y is None) and sys.platform == "win32":
+            l, t, r, b = winapi.window_rect(target.hwnd)
+            if r > l and b > t:
+                x, y = (l + r) // 2, (t + b) // 2
+    if x is not None and y is not None:
+        try:
+            platform_os.move_mouse(int(x), int(y))
+        except OSError as exc:
+            raise ToolError(tr("Non riesco a spostare il mouse.")) from exc
+        time.sleep(0.05)
+
+    amount = max(1, min(30, int(args.get("amount") or 5)))
+    if action == "scroll_down":
+        platform_os.scroll_mouse(dy=-amount)
+        return tr("Ho scorso verso il basso.")
+    if action == "scroll_up":
+        platform_os.scroll_mouse(dy=amount)
+        return tr("Ho scorso verso l'alto.")
+    if action == "scroll_left":
+        platform_os.scroll_mouse(dx=-amount)
+        return tr("Ho scorso a sinistra.")
+    if action == "scroll_right":
+        platform_os.scroll_mouse(dx=amount)
+        return tr("Ho scorso a destra.")
+    if action == "click":
+        if x is None or y is None:
+            raise ToolError(tr("Indica le coordinate (x, y) o usa click_text per cliccare una scritta."))
+        platform_os.click_mouse(int(x), int(y))
+        return tr("Ho cliccato alle coordinate {x}, {y}.").format(x=int(x), y=int(y))
+    if action == "double_click":
+        if x is None or y is None:
+            raise ToolError(tr("Indica le coordinate (x, y) per il doppio clic."))
+        platform_os.click_mouse(int(x), int(y), double=True)
+        return tr("Ho fatto doppio clic alle coordinate {x}, {y}.").format(x=int(x), y=int(y))
+    if action == "right_click":
+        if x is None or y is None:
+            raise ToolError(tr("Indica le coordinate (x, y) per il clic destro."))
+        platform_os.click_mouse(int(x), int(y), right=True)
+        return tr("Ho fatto clic destro alle coordinate {x}, {y}.").format(x=int(x), y=int(y))
+    raise ToolError(tr("Azione del mouse non valida."))
+
+
+_SETTINGS_PAGES = {
+    "main": "ms-settings:",
+    "wifi": "ms-settings:network-wifi",
+    "bluetooth": "ms-settings:bluetooth",
+    "sound": "ms-settings:sound",
+    "display": "ms-settings:display",
+    "battery": "ms-settings:batterysaver",
+    "updates": "ms-settings:windowsupdate",
+    "apps": "ms-settings:appsfeatures",
+    "privacy": "ms-settings:privacy",
+}
+
+
+def _wmi_brightness(level: int | None = None, delta: int = 0) -> int:
+    if level is not None:
+        target = max(0, min(100, int(level)))
+        cmd = f"(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods).WmiSetBrightness(1, {target})"
+    else:
+        cmd = (
+            "$cur = (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness).CurrentBrightness; "
+            f"$next = [Math]::Max(0, [Math]::Min(100, [int]$cur + ({int(delta)}))); "
+            "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods).WmiSetBrightness(1, $next); "
+            "Write-Output $next"
+        )
+    res = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+        capture_output=True, timeout=10, creationflags=CREATE_NO_WINDOW,
+    )
+    if res.returncode != 0:
+        raise ToolError(tr("Questo schermo non permette di regolare la luminosità da Windows."))
+    if level is not None:
+        return max(0, min(100, int(level)))
+    out = res.stdout.decode("utf-8", errors="replace").strip().splitlines()
+    return int(out[-1]) if out and out[-1].strip().isdigit() else 50
+
+
+def _set_theme(dark: bool) -> None:
+    import winreg
+
+    val = 0 if dark else 1
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+        winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, val)
+        winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, val)
+
+
+def system_control(ctx: ToolContext, args: dict) -> str:
+    import psutil
+
+    action = args["action"]
+    if action == "brightness_set":
+        if args.get("level") is None:
+            raise ToolError(tr("Indica la percentuale di luminosità (0-100)."))
+        val = _wmi_brightness(level=int(args["level"]))
+        return tr("Luminosità impostata al {level}%.").format(level=val)
+    if action == "brightness_up":
+        val = _wmi_brightness(delta=15)
+        return tr("Luminosità alzata al {level}%.").format(level=val)
+    if action == "brightness_down":
+        val = _wmi_brightness(delta=-15)
+        return tr("Luminosità abbassata al {level}%.").format(level=val)
+    if action in ("dark_mode", "light_mode"):
+        dark = action == "dark_mode"
+        if sys.platform != "win32":
+            platform_os.unix_set_theme(dark)
+        else:
+            _set_theme(dark)
+        return tr("Ho attivato la modalità scura.") if dark else tr("Ho attivato la modalità chiara.")
+    if action == "empty_recycle_bin":
+        ok = winapi.empty_recycle_bin() if sys.platform == "win32" else platform_os.unix_empty_trash()
+        if not ok:
+            raise ToolError(tr("Windows non ha svuotato il Cestino."))
+        return tr("Ho svuotato il Cestino.")
+    if action == "top_processes":
+        by_name: dict[str, list[float]] = {}
+        for proc in psutil.process_iter(["name", "memory_info"]):
+            try:
+                name = (proc.info.get("name") or "?").removesuffix(".exe")
+                mem = proc.info.get("memory_info")
+                mb = (mem.rss / 2**20) if mem else 0.0
+                by_name[name] = [by_name.get(name, [0.0, 0])[0] + mb, by_name.get(name, [0.0, 0])[1] + 1]
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        top = sorted(by_name.items(), key=lambda kv: kv[1][0], reverse=True)[:6]
+        lines = [f"{name}: {mb:.0f} MB" + (f" ({int(cnt)})" if cnt > 1 else "") for name, (mb, cnt) in top]
+        return tr("Programmi che usano più RAM:\n") + "\n".join(lines)
+    if action == "disk_space":
+        parts = []
+        for part in psutil.disk_partitions(all=False):
+            if "cdrom" in part.opts.lower() or not part.fstype:
+                continue
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                parts.append(
+                    tr("{drive} {free:.0f} GB liberi su {total:.0f} GB").format(
+                        drive=part.device.rstrip("\\"), free=usage.free / 2**30, total=usage.total / 2**30
+                    )
+                )
+            except OSError:
+                continue
+        return "; ".join(parts) + "." if parts else tr("Non leggo i dischi.")
+    if action == "network_info":
+        local_ip = ""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("1.1.1.1", 80))
+                local_ip = s.getsockname()[0]
+        except OSError:
+            pass
+        ssid = ""
+        if sys.platform != "win32":
+            ssid = platform_os.unix_wifi_ssid()
+        else:
+            try:
+                res = subprocess.run(
+                    ["netsh", "wlan", "show", "interfaces"], capture_output=True, timeout=5, creationflags=CREATE_NO_WINDOW
+                )
+                for line in res.stdout.decode("utf-8", errors="replace").splitlines():
+                    if line.strip().startswith("SSID") and "BSSID" not in line:
+                        ssid = line.split(":", 1)[1].strip()
+                        break
+            except Exception:
+                pass
+        if not local_ip:
+            return tr("Il PC non sembra connesso a Internet o alla rete locale.")
+        wifi = tr(" Wi-Fi: {ssid}.").format(ssid=ssid) if ssid else ""
+        return tr("Connesso. IP locale: {ip}.{wifi}").format(ip=local_ip, wifi=wifi)
+    if action == "open_settings":
+        page = (args.get("page") or "main").strip().lower()
+        if sys.platform == "darwin":
+            platform_os.open_path("x-apple.systempreferences:")
+            return tr("Ho aperto le impostazioni di sistema ({page}).").format(page=page)
+        if sys.platform != "win32":
+            platform_os.launch_unix_target("gnome-control-center")
+            return tr("Ho aperto le impostazioni di sistema ({page}).").format(page=page)
+        uri = _SETTINGS_PAGES.get(page, "ms-settings:")
+        os.startfile(uri)
+        return tr("Ho aperto le impostazioni di Windows ({page}).").format(page=page)
+    raise ToolError(tr("Azione di sistema non valida."))
 
 
 TOOLS = [
@@ -291,7 +564,12 @@ TOOLS = [
         ),
         set_volume,
     ),
-    Tool("take_screenshot", "Fa uno screenshot dello schermo.", params(), take_screenshot),
+    Tool(
+        "take_screenshot",
+        "Fa uno screenshot dello schermo o solo della finestra di un'app.",
+        params({"app": {"type": "string", "description": "nome app opzionale"}}),
+        take_screenshot,
+    ),
     Tool(
         "pc_power",
         "Blocca, sospende, spegne o riavvia il PC, o annulla uno spegnimento programmato.",
@@ -305,6 +583,26 @@ TOOLS = [
         pc_power,
     ),
     Tool("system_status", "Stato del PC: CPU, RAM, disco, batteria, da quanto è acceso.", params(), system_status),
+    Tool(
+        "system_control",
+        "Controlli PC: luminosità (brightness_set/up/down), dark_mode, light_mode, empty_recycle_bin, "
+        "top_processes, disk_space, network_info, open_settings.",
+        params(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "brightness_set", "brightness_up", "brightness_down", "dark_mode", "light_mode",
+                        "empty_recycle_bin", "top_processes", "disk_space", "network_info", "open_settings",
+                    ],
+                },
+                "level": {"type": "integer", "description": "0-100 per brightness_set"},
+                "page": {"type": "string", "description": "wifi, bluetooth, sound, display, battery, updates, apps, privacy, main"},
+            },
+            ["action"],
+        ),
+        system_control,
+    ),
     Tool(
         "open_folder",
         "Apre una cartella in Esplora file: Desktop, Documenti, Download… o una tua cartella per nome.",
@@ -329,9 +627,43 @@ TOOLS = [
         uses_screen=True,
     ),
     Tool(
+        "mouse_action",
+        "Scorre la rotella del mouse o clicca alle coordinate (scroll_down, scroll_up, scroll_left, "
+        "scroll_right, click, double_click, right_click).",
+        params(
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["scroll_down", "scroll_up", "scroll_left", "scroll_right", "click", "double_click", "right_click"],
+                },
+                "amount": {"type": "integer", "description": "scatti rotella (default 5)"},
+                "app": {"type": "string", "description": "app opzionale su cui agire"},
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+            },
+            ["action"],
+        ),
+        mouse_action,
+        snapshot_on_error=True,
+        uses_screen=True,
+    ),
+    Tool(
         "set_clipboard",
         "Copia un testo negli appunti di Windows.",
         params({"text": {"type": "string"}}, ["text"]),
         set_clipboard,
+    ),
+    Tool(
+        "clipboard",
+        "Legge, imposta, incolla o svuota gli appunti di Windows (action: get, set, paste, clear).",
+        params(
+            {
+                "action": {"type": "string", "enum": ["get", "set", "paste", "clear"]},
+                "text": {"type": "string", "description": "testo da copiare se action=set"},
+            },
+            ["action"],
+        ),
+        clipboard,
+        uses_screen=True,
     ),
 ]

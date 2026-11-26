@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import sys
 import time
 import uuid
 from ctypes import wintypes
@@ -11,13 +12,20 @@ from ..i18n import tr
 
 log = logging.getLogger("ressy.winapi")
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-shell32 = ctypes.WinDLL("shell32", use_last_error=True)
-ole32 = ctypes.WinDLL("ole32", use_last_error=True)
-try:
-    dwmapi = ctypes.WinDLL("dwmapi")
-except OSError:
+if sys.platform == "win32":
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi")
+    except OSError:
+        dwmapi = None
+else:
+    user32 = None
+    kernel32 = None
+    shell32 = None
+    ole32 = None
     dwmapi = None
 
 ULONG_PTR = ctypes.c_size_t
@@ -189,7 +197,13 @@ GW_OWNER = 4
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_NOACTIVATE = 0x08000000
+SW_MAXIMIZE = 3
+SW_MINIMIZE = 6
 SW_RESTORE = 9
+WS_EX_TOPMOST = 0x00000008
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
 WM_CLOSE = 0x0010
 DWMWA_CLOAKED = 14
 PM_NOREMOVE = 0x0000
@@ -225,6 +239,9 @@ user32.BringWindowToTop.argtypes = [wintypes.HWND]
 user32.BringWindowToTop.restype = wintypes.BOOL
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.ShowWindow.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, wintypes.UINT]
+user32.SetWindowPos.restype = wintypes.BOOL
 user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 user32.AttachThreadInput.restype = wintypes.BOOL
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -310,6 +327,26 @@ def click(x: int, y: int, *, right: bool = False, double: bool = False) -> None:
         for flag in (down, up):
             presses.append(INPUT(type=INPUT_MOUSE, u=_INPUTUNION(mi=MOUSEINPUT(0, 0, 0, flag, 0, 0))))
     send_inputs(presses)
+
+
+MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x1000
+WHEEL_DELTA = 120
+
+
+def scroll(*, dx: int = 0, dy: int = 0) -> None:
+    INPUT_MOUSE = 0
+    events: list[INPUT] = []
+    if dy:
+        events.append(INPUT(type=INPUT_MOUSE, u=_INPUTUNION(
+            mi=MOUSEINPUT(0, 0, ctypes.c_uint32(int(dy) * WHEEL_DELTA).value, MOUSEEVENTF_WHEEL, 0, 0)
+        )))
+    if dx:
+        events.append(INPUT(type=INPUT_MOUSE, u=_INPUTUNION(
+            mi=MOUSEINPUT(0, 0, ctypes.c_uint32(int(dx) * WHEEL_DELTA).value, MOUSEEVENTF_HWHEEL, 0, 0)
+        )))
+    if events:
+        send_inputs(events)
 
 
 def window_size(hwnd: int) -> tuple[int, int]:
@@ -420,6 +457,27 @@ def close_window(hwnd: int) -> bool:
     return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
 
 
+def minimize_window(hwnd: int) -> bool:
+    return bool(user32.ShowWindow(hwnd, SW_MINIMIZE))
+
+
+def maximize_window(hwnd: int) -> bool:
+    return bool(user32.ShowWindow(hwnd, SW_MAXIMIZE))
+
+
+def restore_window(hwnd: int) -> bool:
+    return bool(user32.ShowWindow(hwnd, SW_RESTORE))
+
+
+def is_topmost(hwnd: int) -> bool:
+    return bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+
+def set_topmost(hwnd: int, topmost: bool) -> bool:
+    insert_after = wintypes.HWND(-1 if topmost else -2)
+    return bool(user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+
+
 def lock_workstation() -> bool:
     return bool(user32.LockWorkStation())
 
@@ -462,6 +520,18 @@ user32.EmptyClipboard.argtypes = []
 user32.EmptyClipboard.restype = wintypes.BOOL
 user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
 user32.SetClipboardData.restype = wintypes.HANDLE
+user32.GetClipboardData.argtypes = [wintypes.UINT]
+user32.GetClipboardData.restype = wintypes.HANDLE
+user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+
+
+def _open_clipboard() -> None:
+    for _ in range(20):
+        if user32.OpenClipboard(None):
+            return
+        time.sleep(0.05)
+    raise OSError(tr("gli appunti sono occupati da un altro programma"))
 
 
 def set_clipboard_text(text: str) -> None:
@@ -475,18 +545,43 @@ def set_clipboard_text(text: str) -> None:
         raise OSError(tr("impossibile preparare gli appunti"))
     ctypes.memmove(pointer, data, len(data))
     kernel32.GlobalUnlock(handle)
-    for _ in range(20):
-        if user32.OpenClipboard(None):
-            break
-        time.sleep(0.05)
-    else:
+    try:
+        _open_clipboard()
+    except OSError:
         kernel32.GlobalFree(handle)
-        raise OSError(tr("gli appunti sono occupati da un altro programma"))
+        raise
     try:
         user32.EmptyClipboard()
         if not user32.SetClipboardData(CF_UNICODETEXT, handle):
             kernel32.GlobalFree(handle)
             raise OSError("impossibile scrivere negli appunti")
+    finally:
+        user32.CloseClipboard()
+
+
+def get_clipboard_text() -> str:
+    if not user32.IsClipboardFormatAvailable(CF_UNICODETEXT):
+        return ""
+    _open_clipboard()
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return ""
+        pointer = kernel32.GlobalLock(handle)
+        if not pointer:
+            return ""
+        try:
+            return ctypes.wstring_at(pointer)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def clear_clipboard() -> None:
+    _open_clipboard()
+    try:
+        user32.EmptyClipboard()
     finally:
         user32.CloseClipboard()
 
@@ -598,3 +693,15 @@ def recycle(path: str) -> bool:
         fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,
     )
     return shell32.SHFileOperationW(ctypes.byref(op)) == 0 and not op.fAnyOperationsAborted
+
+
+SHERB_NOCONFIRMATION = 0x00000001
+SHERB_NOPROGRESSUI = 0x00000002
+SHERB_NOSOUND = 0x00000004
+shell32.SHEmptyRecycleBinW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.DWORD]
+shell32.SHEmptyRecycleBinW.restype = ctypes.c_long
+
+
+def empty_recycle_bin() -> bool:
+    hr = shell32.SHEmptyRecycleBinW(None, None, SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND)
+    return hr in (0, -2147418113)

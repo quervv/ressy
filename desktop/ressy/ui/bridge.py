@@ -17,6 +17,7 @@ class UiBridge(QObject):
     pairFailed = Signal(str)
     toastRequested = Signal(str, str)
     settingsRequested = Signal(str)
+    videoUploadRequested = Signal(object)
 
     def state(self, state: str) -> None:
         self.stateChanged.emit(state)
@@ -56,3 +57,6 @@ class UiBridge(QObject):
 
     def open_settings(self, reason: str) -> None:
         self.settingsRequested.emit(reason)
+
+    def request_video_upload(self, payload: dict) -> None:
+        self.videoUploadRequested.emit(payload)

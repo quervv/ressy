@@ -1,6 +1,6 @@
 # Ressy
 
-Ressy è un assistente vocale per Windows. Tieni premuto **K**, di' **«Ressy, sveglia!»** e Ressy ti saluta. Poi apre programmi, scrive su Discord, cerca sul web, fa screenshot, imposta promemoria e ti risponde a voce. Quando sei fuori casa la comandi da **Telegram** o da **Discord**, con messaggi scritti o vocali, attraverso **il tuo bot**.
+Ressy è un assistente vocale AI per **Windows, macOS e Linux**. Tieni premuto **K**, di' **«Ressy, sveglia!»** e Ressy ti saluta. Poi apre programmi, gestisce finestre in multitasking, scrive su Discord, edita video su **CapCut** e **DaVinci Resolve**, cerca sul web, fa screenshot, imposta promemoria/timer e ti risponde a voce. Quando sei fuori casa la comandi da **Telegram** o da **Discord**, con messaggi scritti o vocali, attraverso **il tuo bot**.
 
 - Sito: https://ressy.top
 - Licenza: MIT, gratis e open source.
@@ -14,8 +14,9 @@ Ressy è un assistente vocale per Windows. Tieni premuto **K**, di' **«Ressy, s
 
 ```
 ressy/
-├── desktop/            l'app Windows (PySide6): tasto, microfono, HUD, strumenti, il tuo bot
-│   └── installer/      Ressy-Setup.exe (installazione per l'utente, senza amministratore)
+├── desktop/            l'app desktop (Windows, macOS, Linux — PySide6): tasto, microfono, HUD, strumenti, il tuo bot
+│   ├── installer/      Ressy-Setup.exe (Windows, senza amministratore)
+│   └── scripts/install.sh  installer rapido per macOS e Linux
 ├── server/             il server del bot (aiohttp + Telegram + Discord): dentro l'app o self-host
 └── deploy/             Docker Compose + Caddy per un server su VPS
 ```
@@ -30,12 +31,13 @@ Il sito [ressy.top](https://ressy.top) ha un suo repository: [quervv/ressy-web](
    - Si apre la finestra di Ressy con il logo (cinque barre viola, le stesse della sua voce), le linee della sua voce e, sotto, le tue linee e quello che ha sentito.
    - Da sveglia ascolta finché le dici «grazie, è tutto» o «vai a dormire», oppure finché resti in silenzio per 90 secondi.
 2. **Il cervello** è Groq. L'audio va a Groq con la tua chiave solo per essere trascritto (Whisper large v3, con i nomi delle tue app e dei tuoi contatti come suggerimento). Il modello sceglie lo strumento giusto e Ressy risponde con una voce neurale (in italiano Isabella, Elsa o Diego; in inglese Ava o Andrew). Se la voce neurale non va, usa la voce di Windows. Ressy sa:
-   - aprire, chiudere e passare tra i programmi; scrivere in qualsiasi app (Blocco note, Word, chat) e premere tasti;
-   - creare, leggere e aggiungere testo ai file e creare cartelle (solo nella tua cartella utente);
-   - leggere lo schermo e cliccare su una scritta (con il riconoscimento del testo di Windows, sul PC);
-   - scrivere su Discord: cerca la chat, legge i risultati sullo schermo, clicca quella giusta e controlla l'intestazione prima di scrivere;
-   - meteo, siti (anche «apri time.is»), YouTube, ricerche, musica, volume, screenshot, promemoria, spegnimento;
-   - eseguire comandi PowerShell quando nessun altro strumento basta (i comandi distruttivi vengono rifiutati).
+   - aprire, chiudere, affiancare, fissare e passare tra i programmi in multitasking; scrivere in qualsiasi app (Blocco note, Word, chat) e premere tasti;
+   - editare video con **CapCut** o **DaVinci Resolve**: chiede di caricare i video (drag-and-drop sul PC o percorso in chat) poi costruisce il montaggio con sfondo sfocato/neon, ritmi, effetti, transizioni, sottotitoli e frasi ad impatto;
+   - creare, leggere, rinominare, zippare, cercare file e gestire liste/note (solo nella tua cartella utente);
+   - leggere lo schermo e cliccare su una scritta (con OCR locale: Windows OCR, oppure Tesseract su macOS e Linux);
+   - scrivere su Discord (e leggere la chat aperta o di un amico): cerca la chat, verifica titolo/OCR e invia;
+   - meteo, siti (anche «apri time.is»), YouTube, ricerche multi-sito, musica, volume, screenshot, promemoria, timer/cronometri, spegnimento;
+   - eseguire comandi PowerShell su Windows o bash/zsh su macOS e Linux quando nessun altro strumento basta (i comandi distruttivi vengono rifiutati).
    
    Se si blocca mentre usa lo schermo, fa uno screenshot di dove si è fermata: in chat te lo manda, sul PC lo salva in `Immagini\Ressy`.
 3. **Da remoto** scrivi al **tuo** bot Telegram o Discord. Tre modi, che scegli nell'installer o in Impostazioni › Da remoto:
@@ -54,14 +56,22 @@ Perché un bot a testa: un bot unico per tutti sarebbe un punto unico da cui pas
 
 ## Installare (utenti)
 
+### Windows
 1. Scarica **`Ressy-Setup.exe`** dalle [release](https://github.com/quervv/ressy/releases/latest) e aprilo. Si installa in `%LOCALAPPDATA%\Programs\Ressy`, solo per il tuo utente, senza permessi da amministratore.
    - L'app non è firmata digitalmente: se compare «Windows ha protetto il PC», scegli «Ulteriori informazioni» → «Esegui comunque».
    - Nell'installer scegli cosa installare (Ressy, Ressy Server o entrambi), la cartella, il collegamento sul desktop e l'avvio con Windows.
    - Poi scegli come raggiungere Ressy da Telegram/Discord (vedi sopra) e incolli il token del tuo bot.
    - C'è anche una versione portatile, `Ressy-win64.zip`: estraila e avvia `Ressy\Ressy.exe`.
+
+### macOS e Linux
+1. Scarica **`Ressy-unix.tar.gz`** (o l'archivio nativo per il tuo OS nelle [release](https://github.com/quervv/ressy/releases/latest)), estrailo e avvia:
+   ```bash
+   ./desktop/scripts/install.sh
+   ```
+   Crea il venv, installa le dipendenze, aggiunge il comando `ressy` in `~/.local/bin` e crea `~/Applications/Ressy.app` (macOS) o il lanciatore desktop (Linux). Su Linux per l'audio di fallback installa `espeak-ng` e per il controllo finestre X11 `wmctrl`/`xdotool`/`xclip`. Su macOS consenti microfono e Accessibilità nelle Impostazioni di Sistema.
 2. Al primo avvio si aprono le impostazioni.
-   - Crea una chiave su https://console.groq.com/keys e incollala nella pagina **Groq**: Ressy la verifica.
-   - Chiave Groq e token dei bot restano sul PC, cifrati con Windows (DPAPI).
+   - Scegli l'AI sul PC oppure incolla la tua chiave Groq, Gemini, OpenRouter o Claude.
+   - Le chiavi restano sul PC (`%APPDATA%\Ressy` su Windows cifrato con DPAPI, `~/.config/Ressy` su Linux e `~/Library/Application Support/Ressy` su macOS con permessi utente `0600`).
 3. Tieni premuto K e di' «Ressy, sveglia!». Basta anche solo «Ressy» o «sveglia», e puoi aggiungere subito un comando: «Ressy, sveglia, apri Spotify». Il microfono parte appena premi K, così l'inizio della parola non si perde.
    - Nella pagina **Tasto e ascolto** puoi scegliere un altro tasto e la durata della pressione.
    - Tenendolo premuto, nella finestra aperta la lettera compare al massimo una volta. Se ti dà fastidio, scegli un tasto che non scrive, come F8.
@@ -142,7 +152,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ## Sviluppo dell'app desktop
 
-Requisiti: Windows 10/11 a 64 bit, Python 3.12 (la versione con cui è testata).
+Requisiti: Windows 10/11, macOS o Linux (Python 3.10–3.12).
 
 ```powershell
 cd desktop
@@ -156,13 +166,13 @@ python -m venv .venv
 Per pubblicare una versione:
 
 ```powershell
-.venv\Scripts\python scripts\build_release.py     # web\download\Ressy-Setup.exe, Ressy-win64.zip, Ressy-source.zip
+.venv\Scripts\python scripts\build_release.py     # web\download\Ressy-Setup.exe, Ressy-win64.zip, Ressy-unix.tar.gz, Ressy-source.zip
 .venv\Scripts\python scripts\build_web_assets.py  # favicon, icone e immagine di condivisione del sito
 ```
 
 I download del sito puntano alle [Release su GitHub](https://github.com/quervv/ressy/releases): carica lì i file creati da `build_release.py`.
 
-Le impostazioni stanno in `%APPDATA%\Ressy\config.json` (quelle del server in `server.json`).
+Le impostazioni stanno in `%APPDATA%\Ressy\config.json` su Windows, `~/Library/Application Support/Ressy/config.json` su macOS e `~/.config/Ressy/config.json` su Linux (quelle del server in `server.json`).
 
 ## Licenza
 

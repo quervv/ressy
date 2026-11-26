@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from typing import Callable
@@ -45,6 +46,12 @@ class HoldHotkey:
         self._listener = None
         self._worker: threading.Thread | None = None
         self._running = False
+        self._unix_down: set[int] = set()
+        if modifier_state is None and sys.platform != "win32":
+            self._modifier_down = self._unix_modifier_down
+
+    def _unix_modifier_down(self, vk: int) -> bool:
+        return vk in self._unix_down
 
     def start(self) -> None:
         from pynput import keyboard
@@ -52,9 +59,26 @@ class HoldHotkey:
         self._running = True
         self._worker = threading.Thread(target=self._timer_loop, name="hotkey-timer", daemon=True)
         self._worker.start()
-        self._listener = keyboard.Listener(win32_event_filter=self._filter)
+        if sys.platform == "win32":
+            self._listener = keyboard.Listener(win32_event_filter=self._filter)
+        else:
+            self._listener = keyboard.Listener(on_press=self._on_unix_press, on_release=self._on_unix_release)
         self._listener.start()
         log.info("hotkey listener started")
+
+    def _on_unix_press(self, key) -> None:
+        vk = _pynput_to_vk(key)
+        if vk is None:
+            return
+        self._unix_down.add(vk)
+        self.handle(WM_KEYDOWN, vk, 0)
+
+    def _on_unix_release(self, key) -> None:
+        vk = _pynput_to_vk(key)
+        if vk is None:
+            return
+        self._unix_down.discard(vk)
+        self.handle(WM_KEYUP, vk, 0)
 
     def stop(self) -> None:
         self._running = False
@@ -153,7 +177,41 @@ class HoldHotkey:
             log.exception("hotkey callback failed")
 
 
+def _pynput_to_vk(key) -> int | None:
+    from pynput.keyboard import Key
+
+    char = getattr(key, "char", None)
+    if char and len(char) == 1:
+        upper = char.upper()
+        if "A" <= upper <= "Z" or "0" <= upper <= "9":
+            return ord(upper)
+        oem = {";": 0xBA, ":": 0xBA, "=": 0xBB, "+": 0xBB, ",": 0xBC, "<": 0xBC, "-": 0xBD, "_": 0xBD,
+               ".": 0xBE, ">": 0xBE, "/": 0xBF, "?": 0xBF, "`": 0xC0, "~": 0xC0, "[": 0xDB, "{": 0xDB,
+               "\\": 0xDC, "|": 0xDC, "]": 0xDD, "}": 0xDD, "'": 0xDE, '"': 0xDE}
+        if char in oem:
+            return oem[char]
+    vk = getattr(key, "vk", None)
+    if isinstance(vk, int) and vk in range(0x20, 0xFF):
+        return vk
+    key_map = {
+        Key.shift: 0x10, getattr(Key, "shift_l", Key.shift): 0x10, getattr(Key, "shift_r", Key.shift): 0x10,
+        Key.ctrl: 0x11, getattr(Key, "ctrl_l", Key.ctrl): 0x11, getattr(Key, "ctrl_r", Key.ctrl): 0x11,
+        Key.alt: 0x12, getattr(Key, "alt_l", Key.alt): 0x12, getattr(Key, "alt_r", Key.alt): 0x12,
+        getattr(Key, "alt_gr", Key.alt): 0x12,
+        Key.cmd: 0x5B, getattr(Key, "cmd_l", Key.cmd): 0x5B, getattr(Key, "cmd_r", Key.cmd): 0x5C,
+        Key.insert: 0x2D, Key.scroll_lock: 0x91, Key.pause: 0x13,
+    }
+    if key in key_map:
+        return key_map[key]
+    for i in range(1, 21):
+        if key == getattr(Key, f"f{i}", None):
+            return 0x6F + i
+    return None
+
+
 def _async_key_down(vk: int) -> bool:
+    if sys.platform != "win32":
+        return False
     from ..tools.winapi import user32
 
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)

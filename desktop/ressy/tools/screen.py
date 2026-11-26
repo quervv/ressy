@@ -53,9 +53,20 @@ def grab(region: tuple[int, int, int, int] | None = None):
 
 
 def virtual_origin() -> tuple[int, int]:
-    from .winapi import user32
+    import sys
 
-    return int(user32.GetSystemMetrics(76)), int(user32.GetSystemMetrics(77))
+    if sys.platform == "win32":
+        from .winapi import user32
+
+        return int(user32.GetSystemMetrics(76)), int(user32.GetSystemMetrics(77))
+    try:
+        import mss
+
+        with mss.mss() as sct:
+            mon = sct.monitors[0]
+            return int(mon.get("left", 0)), int(mon.get("top", 0))
+    except Exception:
+        return 0, 0
 
 
 def save_screenshot(image, prefix: str = "screenshot"):
@@ -77,6 +88,12 @@ def as_attachment(image, name: str) -> Attachment:
 
 
 def ocr_available() -> bool:
+    import sys
+
+    if sys.platform != "win32":
+        from .platform_os import tesseract_available
+
+        return tesseract_available()
     try:
         from winrt.windows.media.ocr import OcrEngine
     except Exception:
@@ -124,11 +141,20 @@ async def _recognize(image) -> list[Line]:
 
 
 def read_text(region: tuple[int, int, int, int] | None = None) -> list[Line]:
+    import sys
+
     image = grab(region)
     if region is not None:
         dx, dy = region[0], region[1]
     else:
         dx, dy = virtual_origin()
+    if sys.platform != "win32":
+        from .platform_os import ocr_with_tesseract
+
+        return [
+            Line(text, tuple(Word(w, x + dx, y + dy, ww, hh) for w, x, y, ww, hh in words))
+            for text, words in ocr_with_tesseract(image)
+        ]
     lines = _run(_recognize(image))
     return [
         Line(line.text, tuple(Word(w.text, w.x + dx, w.y + dy, w.w, w.h) for w in line.words)) for line in lines

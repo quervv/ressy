@@ -4,12 +4,16 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import platform
 import re
 import logging
 import os
 import secrets
+import signal
 import socket
 import subprocess
+import sys
+import tarfile
 import threading
 import time
 import zipfile
@@ -25,11 +29,64 @@ from .groq import ChatResult, GroqError
 log = logging.getLogger("ressy.llm.local")
 
 LLAMA_TAG = "b12728"
-LLAMA_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-win-cpu-x64.zip"
-LLAMA_SHA256 = "a8ace09d44bb10e2617268c55c3f2db0e0adeedd9c1ba722969920665a3ae698"
-LLAMA_MB = 25
-_RUNTIME_FILES = ("llama-server.exe", "llama-server-impl.dll", "llama-common.dll", "llama.dll", "mtmd.dll",
-                  "libomp.dll", "ggml.dll", "ggml-base.dll", "ggml-rpc.dll")
+_RUNTIME_SPECS: dict[tuple[str, str], tuple[str, str, int, str]] = {
+    ("win32", "amd64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-win-cpu-x64.zip",
+        "a8ace09d44bb10e2617268c55c3f2db0e0adeedd9c1ba722969920665a3ae698",
+        25,
+        "llama-server.exe",
+    ),
+    ("win32", "arm64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-win-cpu-arm64.zip",
+        "c4babfa1a8ba38b7a86f3719c7254cf15b918eca81179b1a0c76a23779d3985a",
+        13,
+        "llama-server.exe",
+    ),
+    ("darwin", "arm64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-macos-arm64.tar.gz",
+        "001140842db7fa5253e57f891c14db5377937faf07d955a2646b471df0e7d9bd",
+        17,
+        "llama-server",
+    ),
+    ("darwin", "x86_64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-macos-x64.tar.gz",
+        "817b0faa91432ff32ccd6895a7b11a19f0d6ee57d3800c75e93c7d78265c1a9d",
+        13,
+        "llama-server",
+    ),
+    ("linux", "x86_64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-ubuntu-x64.tar.gz",
+        "7c8d787ff15384423d6742a42fad8e7e453d61b94a9c4cd85296e800d538b178",
+        23,
+        "llama-server",
+    ),
+    ("linux", "arm64"): (
+        f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/llama-{LLAMA_TAG}-bin-ubuntu-arm64.tar.gz",
+        "fd00c6490374e11509e22feebfeb3e576662736a18c1ce56b190e388c2e7b003",
+        19,
+        "llama-server",
+    ),
+}
+
+
+def _runtime_spec() -> tuple[str, str, int, str]:
+    plat = "darwin" if sys.platform == "darwin" else ("win32" if sys.platform == "win32" else "linux")
+    mach = platform.machine().lower()
+    if mach in ("aarch64", "arm64"):
+        arch = "arm64"
+    elif plat == "win32":
+        arch = "amd64"
+    else:
+        arch = "x86_64"
+    return _RUNTIME_SPECS.get((plat, arch)) or _RUNTIME_SPECS[(plat, "amd64" if plat == "win32" else "x86_64")]
+
+
+LLAMA_URL, LLAMA_SHA256, LLAMA_MB, _SERVER_BIN = _runtime_spec()
+_RUNTIME_FILES = (
+    "llama-server.exe", "llama-server",
+    "llama-server-impl.dll", "llama-common.dll", "llama.dll", "mtmd.dll",
+    "libomp.dll", "ggml.dll", "ggml-base.dll", "ggml-rpc.dll",
+)
 _READY_MARK = ".ressy-ok"
 
 IDLE_STOP_S = 10 * 60
@@ -40,7 +97,29 @@ LOCAL_TOOLS = (
     "weather", "take_screenshot", "system_status", "reminder", "create_folder", "open_folder", "list_windows",
     "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer", "wait",
 )
-_MAX_HISTORY = 2
+LOCAL_TOOLS_FULL = LOCAL_TOOLS + (
+    "send_discord_message", "read_discord_chat", "write_in_app",
+    "create_file", "read_file", "list_folder", "file_action", "find_files",
+    "edit_video",
+    "read_screen", "click_text", "window_action", "mouse_action", "clipboard",
+    "notes", "timer", "system_control", "read_webpage", "compose_email", "run_powershell",
+)
+_MAX_HISTORY = 4
+_LOCAL_CONTINUE_LOOKING = frozenset({
+    "list_windows", "read_screen", "list_folder", "read_file", "find_files", "read_webpage", "read_discord_chat",
+})
+_LOCAL_PREPARING = frozenset({"open_app", "focus_app", "open_url", "open_folder", "window_action"})
+_LOCAL_OPEN_ONLY = re.compile(
+    r"^\W*(?:apri\w*|avvia\w*|lancia\w*|esegui\w*|vai\b|porta\w*|passa\b|torna\b|minimizz\w*|massimizz\w*|"
+    r"open|launch|start|run|go|switch|bring|focus|minimize|maximize)\b",
+    re.IGNORECASE,
+)
+_LOCAL_MORE_VERBS = re.compile(
+    r"\b(?:scriv\w*|mand\w*|invi\w*|clicca\w*|leggi\w*|cerca\w*|crea\w*|copia\w*|incolla\w*|salva\w*|"
+    r"sinistra|destra|schermo intero|primo piano|write|send|click|read|search|create|copy|paste|save|"
+    r"left|right|fullscreen)\b",
+    re.IGNORECASE,
+)
 
 Progress = Callable[[int, int], None]
 
@@ -66,7 +145,7 @@ def runtime_dir() -> Path:
 
 
 def server_exe() -> Path:
-    return runtime_dir() / "llama-server.exe"
+    return runtime_dir() / _SERVER_BIN
 
 
 def runtime_ready() -> bool:
@@ -95,7 +174,13 @@ def download_size_mb(name: str) -> int:
 
 def _wanted(member: str) -> bool:
     base = member.replace("\\", "/").rsplit("/", 1)[-1]
-    return base in _RUNTIME_FILES or (base.startswith("ggml-cpu") and base.endswith(".dll")) or base.startswith("LICENSE")
+    return (
+        base in _RUNTIME_FILES
+        or (base.startswith("ggml-cpu") and (base.endswith(".dll") or ".so" in base or base.endswith(".dylib")))
+        or ".so" in base
+        or base.endswith(".dylib")
+        or base.startswith("LICENSE")
+    )
 
 
 def install_runtime(archive: Path, target: Path | None = None) -> Path:
@@ -103,19 +188,40 @@ def install_runtime(archive: Path, target: Path | None = None) -> Path:
     with archive.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
-    if digest.hexdigest() != LLAMA_SHA256:
+    expected_sha = LLAMA_SHA256 if LLAMA_SHA256 != _RUNTIME_SPECS[("win32", "amd64")][1] else _runtime_spec()[1]
+    exe_name = _runtime_spec()[3]
+    if digest.hexdigest() != expected_sha:
         raise OSError(tr("il motore AI scaricato non corrisponde a quello ufficiale"))
     target = target or runtime_dir()
-    with zipfile.ZipFile(archive) as zf:
-        for info in zf.infolist():
-            if info.is_dir() or not _wanted(info.filename):
-                continue
-            name = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
-            with zf.open(info) as src, (target / name).open("wb") as dst:
-                while chunk := src.read(1 << 20):
-                    dst.write(chunk)
-    if not (target / "llama-server.exe").is_file():
-        raise OSError(tr("llama-server.exe non trovato nell'archivio"))
+    if archive.name.endswith(".tar.gz") or archive.suffix == ".tgz":
+        with tarfile.open(archive, "r:gz") as tf:
+            for member in tf.getmembers():
+                if not member.isfile() or not _wanted(member.name):
+                    continue
+                name = member.name.replace("\\", "/").rsplit("/", 1)[-1]
+                src = tf.extractfile(member)
+                if src is None:
+                    continue
+                dst_path = target / name
+                with src, dst_path.open("wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        dst.write(chunk)
+                if os.name == "posix" and (name == exe_name or ".so" in name or name.endswith(".dylib")):
+                    os.chmod(dst_path, 0o755)
+    else:
+        with zipfile.ZipFile(archive) as zf:
+            for info in zf.infolist():
+                if info.is_dir() or not _wanted(info.filename):
+                    continue
+                name = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                dst_path = target / name
+                with zf.open(info) as src, dst_path.open("wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        dst.write(chunk)
+                if os.name == "posix" and name == exe_name:
+                    os.chmod(dst_path, 0o755)
+    if not (target / exe_name).is_file():
+        raise OSError(tr("llama-server non trovato nell'archivio"))
     (target / _READY_MARK).write_text(LLAMA_TAG, encoding="utf-8")
     return target
 
@@ -123,6 +229,7 @@ def install_runtime(archive: Path, target: Path | None = None) -> Path:
 def download(name: str, progress: Progress | None = None, cancel: threading.Event | None = None) -> Path:
     from ..speech.local_stt import download_file
 
+    url, _sha, rt_mb, _exe = _runtime_spec()
     total = download_size_mb(name) * 1_000_000
     offset = 0
 
@@ -131,13 +238,14 @@ def download(name: str, progress: Progress | None = None, cancel: threading.Even
             progress(offset + done, max(total, offset + done))
 
     if not runtime_ready():
-        archive = runtime_dir() / "llama.zip"
+        ext = ".tar.gz" if url.endswith(".tar.gz") else ".zip"
+        archive = runtime_dir() / f"llama{ext}"
         try:
-            download_file(LLAMA_URL, archive, LLAMA_MB, step, cancel)
+            download_file(url, archive, rt_mb, step, cancel)
             install_runtime(archive)
         finally:
             archive.unlink(missing_ok=True)
-        offset += LLAMA_MB * 1_000_000
+        offset += rt_mb * 1_000_000
     if not model_ready(name):
         _label, mb, _file, url = LOCAL_LLM_MODELS[name]
         download_file(url, model_path(name), mb, step, cancel)
@@ -150,7 +258,7 @@ def delete_others(keep: str) -> None:
             model_path(name).unlink(missing_ok=True)
 
 
-def _tool_line(schema: dict[str, Any]) -> str:
+def _tool_line(schema: dict[str, Any], limit: int = 90) -> str:
     fn = schema.get("function") or {}
     props = (fn.get("parameters") or {}).get("properties") or {}
     required = set((fn.get("parameters") or {}).get("required") or [])
@@ -158,18 +266,33 @@ def _tool_line(schema: dict[str, Any]) -> str:
     for name, spec in props.items():
         hint = "|".join(map(str, spec["enum"])) if "enum" in spec else spec.get("type", "string")
         args.append(f"{name}{'' if name in required else '?'}: {hint}")
-    description = str(fn.get("description") or "").split(". ")[0].split(" (")[0][:90]
+    description = str(fn.get("description") or "").split(". ")[0].split(" (")[0][:limit]
     return f"- {fn.get('name')}({', '.join(args)}): {description}"
 
 
 _EXAMPLES = (
     ("apri spotify", {"azione": "open_app", "argomenti": {"name": "Spotify"}, "risposta": ""}),
+    ("scrivi su discord a marco ciao", {
+        "azione": "send_discord_message",
+        "argomenti": {"recipient": "Marco", "message": "ciao", "kind": "user"},
+        "risposta": "",
+    }),
     ("metti lofi su youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
+    ("crea il file lista.txt con pane e latte", {
+        "azione": "create_file",
+        "argomenti": {"name": "lista.txt", "content": "pane e latte"},
+        "risposta": "",
+    }),
     ("che tempo fa a Torino?", {"azione": "weather", "argomenti": {"city": "Torino"}, "risposta": ""}),
     ("come stai?", {"azione": "rispondi", "argomenti": {}, "risposta": "Benissimo, grazie! Cosa faccio per te?"}),
 )
 _EXAMPLES_EN = (
     ("open spotify", {"azione": "open_app", "argomenti": {"name": "Spotify"}, "risposta": ""}),
+    ("send marco on discord hi", {
+        "azione": "send_discord_message",
+        "argomenti": {"recipient": "Marco", "message": "hi", "kind": "user"},
+        "risposta": "",
+    }),
     ("play lofi on youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
     ("what's the weather in London?", {"azione": "weather", "argomenti": {"city": "London"}, "risposta": ""}),
     ("how are you?", {"azione": "rispondi", "argomenti": {}, "risposta": "Very well, thanks! What can I do for you?"}),
@@ -177,7 +300,8 @@ _EXAMPLES_EN = (
 
 
 def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | None = None) -> str:
-    lines = "\n".join(_tool_line(t) for t in tools)
+    limit = 65 if len(tools) > 25 else 90
+    lines = "\n".join(_tool_line(t, limit) for t in tools)
     names = {(t.get("function") or {}).get("name") for t in tools}
     if (lang or language()) == "en":
         whose = f"{user_name}'s" if user_name else "this"
@@ -289,17 +413,40 @@ def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
 def result_reply(messages: list[dict[str, Any]]) -> str | None:
     if not messages or messages[-1].get("role") != "tool":
         return None
+    last_user = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user = str(m.get("content") or "")
+            break
+    step_match = re.search(r"(?:Ora fai solo l'azione|Now do only action) \d+:\s*(.+)$", last_user, re.MULTILINE)
+    order_text = step_match.group(1) if step_match else last_user
+
     parts = []
+    tool_names: list[str] = []
+    all_ok = True
     for message in reversed(messages):
         if message.get("role") != "tool":
             break
+        name = str(message.get("name") or "")
+        tool_names.append(name)
         try:
             result = json.loads(message.get("content") or "{}")
         except ValueError:
             result = {}
-        text = str(result.get("esito") or "") if result.get("ok") else \
+        ok = bool(result.get("ok"))
+        if not ok:
+            all_ok = False
+        text = str(result.get("esito") or "") if ok else \
             tr("Non ci sono riuscita: ") + str(result.get("errore") or tr("errore sconosciuto"))
         parts.append(text.strip())
+
+    if all_ok and tool_names:
+        if all(n in _LOCAL_CONTINUE_LOOKING for n in tool_names):
+            return None
+        if all(n in _LOCAL_PREPARING for n in tool_names) and (
+            not _LOCAL_OPEN_ONLY.match(order_text) or _LOCAL_MORE_VERBS.search(order_text)
+        ):
+            return None
     return " ".join(reversed([p for p in parts if p])) or tr("Fatto.")
 
 
@@ -402,11 +549,29 @@ class LlamaServer:
             log_dir().mkdir(parents=True, exist_ok=True)
             out = (log_dir() / "llama-server.log").open("w", encoding="utf-8", errors="replace")
             started = time.monotonic()
+            popen_kwargs: dict[str, Any] = {
+                "cwd": str(runtime_dir()),
+                "stdin": subprocess.DEVNULL,
+                "stdout": out,
+                "stderr": subprocess.STDOUT,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = (
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+                )
+            else:
+                popen_kwargs["start_new_session"] = True
+                env = dict(os.environ)
+                rt = str(runtime_dir())
+                if sys.platform == "darwin":
+                    env["DYLD_LIBRARY_PATH"] = rt + os.pathsep + env.get("DYLD_LIBRARY_PATH", "")
+                else:
+                    env["LD_LIBRARY_PATH"] = rt + os.pathsep + env.get("LD_LIBRARY_PATH", "")
+                popen_kwargs["env"] = env
             self.process = subprocess.Popen(
                 self.command(model_path(name)),
-                cwd=str(runtime_dir()),
-                stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0),
+                **popen_kwargs,
             )
             out.close()
             if self._job is None:
@@ -485,7 +650,8 @@ class LocalLLMClient:
         spoken = result_reply(messages)
         if spoken is not None:
             return ChatResult(message={"role": "assistant", "content": spoken}, model=name, finish_reason="stop")
-        usable = [t for t in (tools or []) if (t.get("function") or {}).get("name") in LOCAL_TOOLS]
+        allowed_set = LOCAL_TOOLS if name == "qwen2.5-0.5b" else LOCAL_TOOLS_FULL
+        usable = [t for t in (tools or []) if (t.get("function") or {}).get("name") in allowed_set]
         names = [] if tool_choice == "none" else [t["function"]["name"] for t in usable]
         chat = to_local_messages(messages, build_prompt(usable, self._user_name()))
         with self._busy:
@@ -497,7 +663,7 @@ class LocalLLMClient:
                 json={
                     "messages": chat,
                     "temperature": 0.2,
-                    "max_tokens": min(max_tokens, 300),
+                    "max_tokens": min(max_tokens, 500),
                     "response_format": {"type": "json_schema",
                                         "json_schema": {"name": "azione", "schema": answer_schema(names, usable)}},
                     "cache_prompt": True,

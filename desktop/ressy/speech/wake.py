@@ -46,7 +46,8 @@ NAME = "ressy"
 NAME_VARIANTS = frozenset(
     {
         "ressy", "ressi", "ressie", "ressey", "resy", "resi", "rexy", "ressee", "rassi", "rassy", "rezzy", "rezi",
-        "rexi", "lessy", "jessy", "tessy", "ressa", "resse", "rescy", "wrecy", "recy",
+        "rexi", "lessy", "jessy", "tessy", "ressa", "resse", "rescy", "wrecy", "recy", "ricci", "rizzi", "racy",
+        "racsy", "raisi", "ress", "resci",
     }
 )
 WAKE_WORDS = ("sveglia", "svegliati", "sveglio", "svegliarti", "svegliamo", "wake", "wakeup")
@@ -60,13 +61,20 @@ SLEEP_PHRASES = frozenset(
         "dormi",
         "vai a dormire",
         "torna a dormire",
+        "ok vai a dormire",
         "puoi andare",
         "puoi andare a dormire",
+        "puoi dormire",
+        "mettiti a dormire",
         "basta cosi",
         "basta cosi grazie",
         "grazie e tutto",
         "e tutto grazie",
         "grazie basta cosi",
+        "va bene grazie",
+        "va bene ciao",
+        "ok grazie",
+        "ok ciao",
         "a dopo",
         "buonanotte",
         "go to sleep",

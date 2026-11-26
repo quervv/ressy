@@ -97,12 +97,19 @@ class Speaker:
         return bytes(audio)
 
     def sapi_wav(self, text: str) -> bytes:
+        import sys
+
+        clean = clean_for_speech(text)
+        if sys.platform == "darwin":
+            return self._mac_say_wav(clean)
+        if sys.platform != "win32":
+            return self._linux_espeak_wav(clean)
         workdir = tempfile.mkdtemp(prefix="ressy-tts-")
         try:
             txt_path = os.path.join(workdir, "testo.txt")
             wav_path = os.path.join(workdir, "voce.wav")
             with open(txt_path, "w", encoding="utf-8") as fh:
-                fh.write(text)
+                fh.write(clean)
             culture = "en" if self.settings.language == "en" else "it"
             rate = max(-10, min(10, round(int(self.settings.tts_rate) / 5)))
             script = (
@@ -126,6 +133,52 @@ class Speaker:
                 capture_output=True,
                 timeout=90,
                 creationflags=CREATE_NO_WINDOW,
+            )
+            with open(wav_path, "rb") as fh:
+                return fh.read()
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    def _mac_say_wav(self, clean: str) -> bytes:
+        voice = "Alice" if self.settings.language == "it" else "Samantha"
+        rate_wpm = max(110, min(280, int(175 * (1.0 + int(self.settings.tts_rate) / 100.0))))
+        workdir = tempfile.mkdtemp(prefix="ressy-tts-")
+        try:
+            txt_path = os.path.join(workdir, "text.txt")
+            wav_path = os.path.join(workdir, "out.wav")
+            with open(txt_path, "w", encoding="utf-8") as fh:
+                fh.write(clean)
+            res = subprocess.run(
+                ["say", "-v", voice, "-r", str(rate_wpm),
+                 "--file-format=WAVE", "--data-format=LEI16@22050", "-o", wav_path, "-f", txt_path],
+                capture_output=True, timeout=90,
+            )
+            if res.returncode != 0:
+                subprocess.run(
+                    ["say", "-r", str(rate_wpm), "--file-format=WAVE", "--data-format=LEI16@22050",
+                     "-o", wav_path, "-f", txt_path],
+                    check=True, capture_output=True, timeout=90,
+                )
+            with open(wav_path, "rb") as fh:
+                return fh.read()
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    def _linux_espeak_wav(self, clean: str) -> bytes:
+        exe = shutil.which("espeak-ng") or shutil.which("espeak")
+        if exe is None:
+            raise RuntimeError("No offline TTS engine found (install espeak-ng)")
+        voice = "it" if self.settings.language == "it" else "en"
+        rate_wpm = max(110, min(280, int(170 * (1.0 + int(self.settings.tts_rate) / 100.0))))
+        workdir = tempfile.mkdtemp(prefix="ressy-tts-")
+        try:
+            txt_path = os.path.join(workdir, "text.txt")
+            wav_path = os.path.join(workdir, "out.wav")
+            with open(txt_path, "w", encoding="utf-8") as fh:
+                fh.write(clean)
+            subprocess.run(
+                [exe, "-v", voice, "-s", str(rate_wpm), "-w", wav_path, "-f", txt_path],
+                check=True, capture_output=True, timeout=90,
             )
             with open(wav_path, "rb") as fh:
                 return fh.read()

@@ -1505,4 +1505,344 @@ EN: dict[str, str] = {
         "The speech model didn't download ({exc}): Ressy will offer it again in the settings.",
     'Scarico il modello vocale… {value:.0f} di {value2:.0f} MB':
         'Downloading the speech model… {value:.0f} of {value2:.0f} MB',
+    ' Wi-Fi: {ssid}.':
+        ' Wi-Fi: {ssid}.',
+    ' per {to}':
+        ' for {to}',
+    '1 minuto':
+        '1 minute',
+    '1 ora':
+        '1 hour',
+    '1 secondo':
+        '1 second',
+    'Aggiorno le note…':
+        'Updating notes…',
+    'Azione del mouse non valida.':
+        'Invalid mouse action.',
+    'Azione di sistema non valida.':
+        'Invalid system action.',
+    'Azione finestra non valida.':
+        'Invalid window action.',
+    'Azione non valida per gli appunti.':
+        'Invalid clipboard action.',
+    'Azione non valida per le note.':
+        'Invalid notes action.',
+    'Azione programmata':
+        'Scheduled action',
+    'Azione programmata saltata (il PC era spento): {command}':
+        'Scheduled action skipped (the PC was off): {command}',
+    'Azione timer non valida.':
+        'Invalid timer action.',
+    'Cerco i file…':
+        'Searching files…',
+    'Connesso. IP locale: {ip}.{wifi}':
+        'Connected. Local IP: {ip}.{wifi}',
+    'Cosa devo cercare nei file?':
+        'What should I search for in your files?',
+    'Cosa devo segnare?':
+        'What should I write down?',
+    'Cronometro avviato.':
+        'Stopwatch started.',
+    'Cronometro fermato a {span}.':
+        'Stopwatch stopped at {span}.',
+    'Cronometro: {span}.':
+        'Stopwatch: {span}.',
+    'Discord':
+        'Discord',
+    'Ecco le note:\n':
+        'Here are your notes:\n',
+    'Eseguirò «{command}» tra {span}.':
+        'I will run «{command}» in {span}.',
+    "Esiste già l'archivio {name}.":
+        'The archive {name} already exists.',
+    'Gestisco gli appunti…':
+        'Managing clipboard…',
+    'Gestisco timer e cronometro…':
+        'Managing timers and stopwatch…',
+    'Gli appunti sono vuoti (o non contengono testo).':
+        'The clipboard is empty (or has no text).',
+    'Ho affiancato {label} a destra.':
+        'I snapped {label} to the right.',
+    'Ho affiancato {label} a sinistra.':
+        'I snapped {label} to the left.',
+    'Ho annullato il timer «{text}».':
+        'I cancelled the timer «{text}».',
+    'Ho aperto le impostazioni di Windows ({page}).':
+        'I opened Windows settings ({page}).',
+    'Ho aperto {kind} {name}.':
+        'I opened {kind} {name}.',
+    'Ho attivato la modalità chiara.':
+        'I switched to light mode.',
+    'Ho attivato la modalità scura.':
+        'I switched to dark mode.',
+    'Ho attivato o tolto lo schermo intero su {label}.':
+        'I toggled fullscreen on {label}.',
+    'Ho cancellato tutte le note.':
+        'I cleared all notes.',
+    'Ho cercato «{query}» su {site} nel browser.':
+        'I searched for «{query}» on {site} in the browser.',
+    'Ho cliccato alle coordinate {x}, {y}.':
+        'I clicked at {x}, {y}.',
+    'Ho compresso {name} in {archive}.':
+        'I compressed {name} into {archive}.',
+    'Ho estratto {name} {where}.':
+        'I extracted {name} {where}.',
+    'Ho fatto clic destro alle coordinate {x}, {y}.':
+        'I right-clicked at {x}, {y}.',
+    'Ho fatto doppio clic alle coordinate {x}, {y}.':
+        'I double-clicked at {x}, {y}.',
+    'Ho incollato dagli appunti.':
+        'I pasted from the clipboard.',
+    'Ho ingrandito {label}.':
+        'I maximized {label}.',
+    'Ho mostrato il desktop riducendo a icona le finestre.':
+        'I showed the desktop by minimizing the windows.',
+    'Ho preparato la bozza email{to}.':
+        'I prepared the email draft{to}.',
+    'Ho ridotto a icona {label}.':
+        'I minimized {label}.',
+    'Ho ripristinato {label}.':
+        'I restored {label}.',
+    'Ho scorso a destra.':
+        'Scrolled right.',
+    'Ho scorso a sinistra.':
+        'Scrolled left.',
+    'Ho scorso verso il basso.':
+        'Scrolled down.',
+    "Ho scorso verso l'alto.":
+        'Scrolled up.',
+    'Ho svuotato gli appunti.':
+        'I cleared the clipboard.',
+    'Ho svuotato il Cestino.':
+        'I emptied the Recycle Bin.',
+    'Ho svuotato la lista {category}.':
+        'I cleared the {category} list.',
+    'Ho tolto «{text}» dalle note.':
+        'I removed «{text}» from your notes.',
+    'Ho trovato e aperto {name} ({where}).':
+        'I found and opened {name} ({where}).',
+    'Ho trovato {count} risultato/i:\n':
+        'Found {count} result(s):\n',
+    'Il PC non sembra connesso a Internet o alla rete locale.':
+        'The PC does not seem connected to the Internet or local network.',
+    'Il PC è bloccato: non posso gestire le finestre finché non viene sbloccato.':
+        'The PC is locked: I cannot manage windows until it is unlocked.',
+    'Il PC è bloccato: non posso usare Discord finché non viene sbloccato.':
+        'The PC is locked: I cannot use Discord until it is unlocked.',
+    'Il cronometro non è avviato.':
+        'The stopwatch is not running.',
+    'Il riconoscimento del testo di Windows non è disponibile per leggere Discord.':
+        'Windows text recognition is not available to read Discord.',
+    'Indica la durata del timer (secondi o minuti).':
+        'Tell me how long the timer should be (seconds or minutes).',
+    'Indica la percentuale di luminosità (0-100).':
+        'Specify the brightness percentage (0-100).',
+    'Indica le coordinate (x, y) o usa click_text per cliccare una scritta.':
+        'Provide (x, y) coordinates or use click_text to click on text.',
+    'Indica le coordinate (x, y) per il clic destro.':
+        'Provide (x, y) coordinates for the right click.',
+    'Indica le coordinate (x, y) per il doppio clic.':
+        'Provide (x, y) coordinates for the double click.',
+    "L'archivio contiene percorsi non sicuri.":
+        'The archive contains unsafe paths.',
+    'La finestra di {name} è ridotta a icona.':
+        'The {name} window is minimized.',
+    'La pagina non contiene testo leggibile.':
+        'The page has no readable text.',
+    'Leggo Discord…':
+        'Reading Discord…',
+    'Leggo la pagina web…':
+        'Reading the webpage…',
+    'Luminosità abbassata al {level}%.':
+        'Brightness lowered to {level}%.',
+    'Luminosità alzata al {level}%.':
+        'Brightness raised to {level}%.',
+    'Luminosità impostata al {level}%.':
+        'Brightness set to {level}%.',
+    'Messaggi visibili in {target}:\n{text}':
+        'Visible messages in {target}:\n{text}',
+    'Muovo il mouse…':
+        'Moving the mouse…',
+    "Negli appunti c'è:\n{text}":
+        'On the clipboard:\n{text}',
+    'Nessun timer con codice {wanted_id}.':
+        'No timer with code {wanted_id}.',
+    "Non c'è nessuna finestra attiva.":
+        'There is no active window.',
+    'Non ci sono note in {category}.':
+        'There are no notes in {category}.',
+    'Non ci sono timer attivi da annullare.':
+        'There are no active timers to cancel.',
+    'Non ci sono timer attivi.':
+        'There are no active timers.',
+    'Non hai nessuna nota salvata.':
+        'You have no saved notes.',
+    'Non ho trovato nessun file o cartella per «{query}».':
+        'I could not find any file or folder for «{query}».',
+    'Non leggo i dischi.':
+        'I cannot read the drives.',
+    'Non posso aprire indirizzi locali o privati.':
+        'I cannot open local or private addresses.',
+    'Non posso calcolare la radice di un numero negativo.':
+        'I cannot compute the square root of a negative number.',
+    'Non riesco a leggere il testo nella finestra di Discord.':
+        'I cannot read the text in the Discord window.',
+    'Non riesco a portare {label} in primo piano.':
+        'I cannot bring {label} to the front.',
+    'Non riesco a trovare il sito {host}.':
+        'I cannot find the site {host}.',
+    'Non sono riuscita a leggere la pagina ({exc}).':
+        'I could not read the page ({exc}).',
+    'Non trovo quella nota.':
+        'I cannot find that note.',
+    'Non vedo messaggi leggibili nella chat di {target}.':
+        'I do not see readable messages in {target}.',
+    'Posso impostare timer al massimo per 30 giorni.':
+        'I can set timers for at most 30 days.',
+    'Preparo l’email…':
+        'Preparing the email…',
+    'Programmi che usano più RAM:\n':
+        'Programs using the most RAM:\n',
+    'Quale nota devo togliere?':
+        'Which note should I remove?',
+    'Quale testo devo copiare negli appunti?':
+        'What text should I copy to the clipboard?',
+    'Questo schermo non permette di regolare la luminosità da Windows.':
+        'This display does not allow adjusting brightness from Windows.',
+    'Regolo le impostazioni del PC…':
+        'Adjusting PC settings…',
+    'Segnato in {category}: {text}.':
+        'Added to {category}: {text}.',
+    'Segnato nelle note: {text}.':
+        'Added to notes: {text}.',
+    'Sistemo la finestra…':
+        'Arranging the window…',
+    'Sono passata alla finestra precedente.':
+        'Switched to the previous window.',
+    'Tengo sempre in primo piano {label}.':
+        'Keeping {label} always on top.',
+    'Timer':
+        'Timer',
+    'Timer attivi:\n':
+        'Active timers:\n',
+    'Timer impostato per {span}: {label}.':
+        'Timer set for {span}: {label}.',
+    'Timer scaduto: {text}.':
+        'Timer finished: {text}.',
+    'Windows non ha svuotato il Cestino.':
+        'Windows did not empty the Recycle Bin.',
+    '[{id}] {text} (tra {span})':
+        '[{id}] {text} (in {span})',
+    'la finestra':
+        'the window',
+    'la finestra attiva':
+        'the active window',
+    '{drive} {free:.0f} GB liberi su {total:.0f} GB':
+        '{drive} {free:.0f} GB free of {total:.0f} GB',
+    '{label} non è più fissata in primo piano.':
+        '{label} is no longer pinned on top.',
+    '{name} non è un archivio .zip.':
+        '{name} is not a .zip archive.',
+    '{n} minuti':
+        '{n} minutes',
+    '{n} ore':
+        '{n} hours',
+    '{n} secondi':
+        '{n} seconds',
+    "Ressy, l'assistente vocale AI per desktop.":
+        'Ressy, the AI voice assistant for desktop.',
+    "llama-server non trovato nell'archivio":
+        'llama-server was not found in the archive',
+    'Edito il video…':
+        'Editing the video…',
+    'Il riconoscimento del testo sullo schermo non è disponibile per leggere Discord.':
+        'Screen text recognition is not available to read Discord.',
+    'Il riconoscimento del testo sullo schermo non è disponibile.':
+        'Screen text recognition is not available.',
+    'Nessun gestore appunti trovato (xclip, xsel o wl-copy).':
+        'No clipboard helper found (xclip, xsel or wl-copy).',
+    'Impossibile aprire: xdg-open non è installato.':
+        'Cannot open: xdg-open is not installed.',
+    'Specifica i tasti da premere.':
+        'Specify the keys to press.',
+    "Tasto sconosciuto: '{token}'.":
+        "Unknown key: '{token}'.",
+    'Spengo il PC tra {delay} secondi.':
+        'Shutting down the PC in {delay} seconds.',
+    'Riavvio il PC tra {delay} secondi.':
+        'Restarting the PC in {delay} seconds.',
+    'Ho aperto le impostazioni di sistema ({page}).':
+        'Opened system settings ({page}).',
+    "Carica almeno un file video per iniziare l'editing.":
+        'Upload at least one video file to start editing.',
+    'DaVinci Resolve non sembra installato su questo PC, ma ho preparato tutto il pacchetto timeline (.fcpxml, sfondo, frasi PNG ed .srt) in {folder}.{preview}':
+        'DaVinci Resolve does not appear installed on this PC, but I prepared the full timeline bundle (.fcpxml, background, PNG phrases and .srt) in {folder}.{preview}',
+    'CapCut su Linux non ha un client desktop nativo: scegli DaVinci Resolve oppure attiva render_preview.':
+        'CapCut does not have a native Linux desktop client: pick DaVinci Resolve or enable render_preview.',
+    'Progetto CapCut «{project}» creato con successo ({clips} clip, sfondo, {phrases} frasi ad impatto, effetti) in {path}.{preview}':
+        'CapCut project "{project}" created ({clips} clips, background, {phrases} impact phrases, effects) at {path}.{preview}',
+    ' Anteprima MP4 esportata: {path}.':
+        ' Preview MP4 exported: {path}.',
+    'Editing completato su DaVinci Resolve! Progetto «{project}» aperto nella pagina Edit con {clips} clip, sfondo, {phrases} frasi ad impatto e sottotitoli ({ratio}).{preview}':
+        'DaVinci Resolve editing complete! Project "{project}" opened on the Edit page with {clips} clips, background, {phrases} impact phrases and captions ({ratio}).{preview}',
+    'Ho preparato il progetto DaVinci Resolve «{project}» ({clips} clip, sfondo, {phrases} frasi ad impatto ed effetti) e ho aperto DaVinci Resolve: importa {xml} da File > Import > Timeline per caricare la timeline completa.{preview}':
+        'Prepared DaVinci Resolve project "{project}" ({clips} clips, background, {phrases} impact phrases and effects) and opened DaVinci Resolve: import {xml} via File > Import > Timeline to load the full timeline.{preview}',
+    'Ho aperto {editor} ed è tutto pronto! Carica o dimmi i video da editare (percorso o nome file in Download/Video): poi aggiungerò sfondo, effetti e frasi ad impatto.':
+        'Opened {editor} and everything is ready! Upload or tell me which videos to edit (file path or name in Downloads/Videos), then I will add background, effects and impact phrases.',
+    'Non trovo questi file video: {files}. Controlla il nome o il percorso.':
+        'Cannot find these video files: {files}. Check the file name or path.',
+    ' Anteprima esportata: {path}.':
+        ' Preview exported: {path}.',
+    'Editing completato su CapCut! Ho creato il progetto «{project}» con {clips} clip, sfondo personalizzato, {phrases} frasi ad impatto, effetti e ritmo ({ratio}).{preview} CapCut è aperto con il progetto pronto.':
+        'CapCut editing complete! Created project "{project}" with {clips} clips, custom background, {phrases} impact phrases, effects and pacing ({ratio}).{preview} CapCut is open with your project ready.',
+    'Ressy · Carica i video da editare':
+        'Ressy · Upload videos to edit',
+    'Carica i video da editare':
+        'Upload videos to edit',
+    'Trascina i video qui sotto oppure scegli i file. Ressy aggiungerà sfondo, effetti e frasi ad impatto su CapCut o DaVinci Resolve.':
+        'Drop your videos below or choose files. Ressy will add background, effects and impact phrases in CapCut or DaVinci Resolve.',
+    'Scegli video…':
+        'Choose videos…',
+    'Rimuovi selezionato':
+        'Remove selected',
+    'Automatico (usa quello installato)':
+        'Automatic (use installed editor)',
+    'Viral / TikTok / Reels (dinamico + testi grandi)':
+        'Viral / TikTok / Reels (dynamic + bold text)',
+    'Cinematic (transizioni morbide + titoli eleganti)':
+        'Cinematic (smooth transitions + sleek titles)',
+    'Gaming / Highlight (zoom veloci + neon)':
+        'Gaming / Highlight (punchy zoom + neon)',
+    'Vlog (pulito + sottotitoli)':
+        'Vlog (clean + captions)',
+    'Verticale 9:16 (TikTok / Reels / Shorts)':
+        'Vertical 9:16 (TikTok / Reels / Shorts)',
+    'Orizzontale 16:9 (YouTube)':
+        'Landscape 16:9 (YouTube)',
+    'Quadrato 1:1':
+        'Square 1:1',
+    'Es. NON CI CREDERAI MAI (opzionale)':
+        'E.g. YOU WON’T BELIEVE THIS (optional)',
+    'Frasi ad impatto separate da virgola (opzionale)':
+        'Impact phrases separated by commas (optional)',
+    'Esporta anche un MP4 finito pronto subito (oltre al progetto)':
+        'Also export a finished MP4 preview right away (in addition to the project)',
+    'Editor video':
+        'Video editor',
+    'Stile montaggio':
+        'Edit style',
+    'Formato':
+        'Aspect ratio',
+    'Titolo iniziale':
+        'Opening hook title',
+    'Frasi ad impatto':
+        'Impact phrases',
+    'Inizia editing':
+        'Start editing',
+    "Seleziona i video o l'audio":
+        'Select videos or audio',
+    'Video e audio (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.mp3 *.wav);;Tutti i file (*)':
+        'Video and audio (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.mp3 *.wav);;All files (*)',
+    'Carica almeno un video prima di iniziare.':
+        'Upload at least one video before starting.',
 }

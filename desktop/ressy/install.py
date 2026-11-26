@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__, dpapi
-from .paths import app_dir
+from .paths import app_dir, chmod_private
 
 log = logging.getLogger("ressy.install")
 
@@ -178,6 +178,7 @@ class ServerConfig:
         }
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        chmod_private(tmp)
         os.replace(tmp, path)
 
 

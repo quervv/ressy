@@ -39,3 +39,36 @@ def similarity(a: str, b: str) -> float:
     if a == b:
         return 1.0
     return SequenceMatcher(None, a, b).ratio()
+
+
+_SPOKEN_APP_CONTEXT = (
+    r"(?:apri\w*|chiudi\w*|avvia\w*|lancia\w*|termina\w*|passa\s+a|vai\s+su|torna\s+su|porta\s+avanti|"
+    r"minimizza\w*|massimizza\w*|ingrandisci\w*|in|nel|nella|su|sul|sulla|su'|con|open|close|launch|start|on)"
+)
+_SPOKEN_SUBS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(rf"(\b{_SPOKEN_APP_CONTEXT}\s+(?:il\s+)?)(?:discorso|discordia|discordo|di\s+scord|di\s+scort)\b", re.I),
+     r"\1Discord"),
+    (re.compile(rf"(\b{_SPOKEN_APP_CONTEXT}\s+)(?:spotifai|spot\s+if\s+i|spoti\s+fai|spotifi)\b", re.I), r"\1Spotify"),
+    (re.compile(rf"(\b{_SPOKEN_APP_CONTEXT}\s+)(?:uozzap|wazzap|watsap|what'?s\s*up|what\s+app)\b", re.I),
+     r"\1WhatsApp"),
+    (re.compile(rf"(\b{_SPOKEN_APP_CONTEXT}\s+(?:google\s+)?)(?:cromo)\b", re.I), r"\1Chrome"),
+    (re.compile(r"\bblocconote\b", re.I), "Blocco note"),
+    (re.compile(rf"(\b{_SPOKEN_APP_CONTEXT}\s+)(?:time\s+is|taim\s+is)\b", re.I), r"\1time.is"),
+    (re.compile(r"\b(?:cap\s*cut+|capcat|cup\s*cut|cepcat)\b", re.I), "CapCut"),
+    (re.compile(r"\b(?:da\s*vinci(?:\s+resolve)?|davinci(?:\s+risolv\w*)?)\b", re.I), "DaVinci Resolve"),
+    (re.compile(
+        r"\s+è\s+(?=(?:apri|chiudi|avvia|scrivi|manda|invia|crea|cerca|metti|imposta|alza|abbassa|"
+        r"fai|leggi|sposta|copia|cestina|elimina|rimuovi|ricorda|mostra|clicca|minimizza|massimizza|"
+        r"muta|silenzia|ferma|riprendi|salta)\b)",
+        re.I,
+    ), " e "),
+)
+
+
+def fix_spoken_text(text: str) -> str:
+    out = (text or "").strip()
+    if not out:
+        return ""
+    for pattern, repl in _SPOKEN_SUBS:
+        out = pattern.sub(repl, out)
+    return out

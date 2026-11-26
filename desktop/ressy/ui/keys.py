@@ -60,6 +60,39 @@ _ALLOWED_VK = (
 )
 
 
+named_qt = {
+    Qt.Key.Key_Pause: 0x13,
+    Qt.Key.Key_ScrollLock: 0x91,
+    Qt.Key.Key_Insert: 0x2D,
+    Qt.Key.Key_Semicolon: 0xBA,
+    Qt.Key.Key_Equal: 0xBB,
+    Qt.Key.Key_Comma: 0xBC,
+    Qt.Key.Key_Minus: 0xBD,
+    Qt.Key.Key_Period: 0xBE,
+    Qt.Key.Key_Slash: 0xBF,
+    Qt.Key.Key_QuoteLeft: 0xC0,
+    Qt.Key.Key_BracketLeft: 0xDB,
+    Qt.Key.Key_Backslash: 0xDC,
+    Qt.Key.Key_BracketRight: 0xDD,
+    Qt.Key.Key_Apostrophe: 0xDE,
+}
+
+
+def _resolve_vk(event: QKeyEvent) -> int:
+    import sys
+
+    if sys.platform == "win32":
+        return int(event.nativeVirtualKey())
+    qt = int(event.key())
+    if 0x30 <= qt <= 0x39 or 0x41 <= qt <= 0x5A:
+        return qt
+    if Qt.Key.Key_F1 <= qt <= Qt.Key.Key_F24:
+        return 0x70 + (qt - int(Qt.Key.Key_F1))
+    if event.key() in named_qt:
+        return named_qt[event.key()]
+    return int(event.nativeVirtualKey())
+
+
 def key_name(vk: int, text: str = "", qt_key: int = 0) -> str:
     if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
         return chr(vk)
@@ -138,7 +171,7 @@ class KeyCapture(QAbstractButton):
             return
         if event.isAutoRepeat():
             return
-        vk = int(event.nativeVirtualKey())
+        vk = _resolve_vk(event)
         if event.key() == Qt.Key.Key_Escape:
             self.stop()
             return

@@ -15,3 +15,5 @@ class Services:
     llm: Any
     apps: AppIndex
     reminders: ReminderService
+    ui: Any = None
+    stt: Any = None

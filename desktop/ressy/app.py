@@ -25,7 +25,7 @@ def _server_name() -> str:
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="ressy", description=tr("Ressy, l'assistente vocale per Windows."))
+    parser = argparse.ArgumentParser(prog="ressy", description=tr("Ressy, l'assistente vocale AI per desktop."))
     parser.add_argument("--background", action="store_true", help="avvio silenzioso (solo icona nell'area di notifica)")
     parser.add_argument("--debug", action="store_true", help="registri dettagliati")
     parser.add_argument("--server", action="store_true", help="avvia il server del tuo bot (self-host), senza finestre")
@@ -156,6 +156,18 @@ def main(argv: list[str] | None = None) -> int:
 
     tray = Tray(controller, bridge, open_settings=open_settings, open_pairing=open_pairing, quit_app=app.quit)
     bridge.settingsRequested.connect(open_settings)
+
+    def open_video_upload(request: dict) -> None:
+        from .ui.video_dialog import VideoUploadDialog
+
+        dlg = VideoUploadDialog(defaults=request.get("defaults") or {})
+        if dlg.exec() == dlg.DialogCode.Accepted and dlg.result_payload:
+            request["result"]["payload"] = dlg.result_payload
+        event = request.get("event")
+        if event is not None:
+            event.set()
+
+    bridge.videoUploadRequested.connect(open_video_upload)
 
     from .ui.update_dialog import UpdateChecker, UpdateDialog
 
