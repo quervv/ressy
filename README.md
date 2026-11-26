@@ -8,6 +8,8 @@ Ressy è un assistente vocale per Windows. Tieni premuto **K**, di' **«Ressy, s
 - Comandi semplici (apri app e siti, meteo, volume, musica, ora, promemoria, calcoli) eseguiti sul PC senza usare richieste AI.
 - AI sul PC (facoltativa): un modello Qwen 2.5 (Apache 2.0, 491 MB o 1,1 GB) eseguito dal motore ufficiale llama.cpp, scaricato alla prima scelta in `%APPDATA%\Ressy`. Gratis, offline e senza chiave: può essere il cervello principale o l'ultima riserva quando tutte le chiavi sono al limite. Gira solo su 127.0.0.1 e si spegne dopo 10 minuti di inattività.
 - Consumi: chiedi «quanto mi resta delle API?» o guarda Impostazioni › Intelligenza › Consumi delle chiavi.
+- Lingue: italiano e inglese, per finestre, voce, risposte e frasi di risveglio («Ressy, wake up!»). Si sceglie nell'installer o in Impostazioni › Generale; quando la cambi Ressy si riavvia. Le risposte automatiche del bot (avvisi offline/online, aiuto) per ora restano in italiano.
+- Più richieste in una frase («apri Discord, scrivi a Marco che arrivo e crea la cartella scuola»): Ressy le divide in passi e li fa uno alla volta, in ordine, aspettando che ognuno sia finito (per esempio che Discord sia davvero aperto) prima del successivo.
 - Nessun bot condiviso: ognuno crea il proprio. Gira dentro Ressy sul PC, oppure su un tuo server (self-host).
 
 ```
@@ -27,7 +29,7 @@ Il sito [ressy.top](https://ressy.top) ha un suo repository: [quervv/ressy-web](
    - Se lo tieni premuto (350 ms), K diventa push-to-talk.
    - Si apre la finestra di Ressy con il logo (cinque barre viola, le stesse della sua voce), le linee della sua voce e, sotto, le tue linee e quello che ha sentito.
    - Da sveglia ascolta finché le dici «grazie, è tutto» o «vai a dormire», oppure finché resti in silenzio per 90 secondi.
-2. **Il cervello** è Groq. L'audio va a Groq con la tua chiave solo per essere trascritto (Whisper large v3, con i nomi delle tue app e dei tuoi contatti come suggerimento). Il modello sceglie lo strumento giusto e Ressy risponde con una voce neurale italiana (Isabella, Elsa o Diego). Se la voce neurale non va, usa la voce di Windows. Ressy sa:
+2. **Il cervello** è Groq. L'audio va a Groq con la tua chiave solo per essere trascritto (Whisper large v3, con i nomi delle tue app e dei tuoi contatti come suggerimento). Il modello sceglie lo strumento giusto e Ressy risponde con una voce neurale (in italiano Isabella, Elsa o Diego; in inglese Ava o Andrew). Se la voce neurale non va, usa la voce di Windows. Ressy sa:
    - aprire, chiudere e passare tra i programmi; scrivere in qualsiasi app (Blocco note, Word, chat) e premere tasti;
    - creare, leggere e aggiungere testo ai file e creare cartelle (solo nella tua cartella utente);
    - leggere lo schermo e cliccare su una scritta (con il riconoscimento del testo di Windows, sul PC);

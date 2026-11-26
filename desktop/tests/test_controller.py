@@ -66,7 +66,7 @@ class FakeBrain:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str]] = []
 
-    async def respond(self, text, channel, on_tool=None):
+    async def respond(self, text, channel, on_tool=None, on_step=None):
         self.requests.append((text, channel.kind))
         if "screenshot" in text:
             return TurnResult(text="Ecco lo schermo.", images=[Attachment(b"\xff\xd8jpeg", "s.jpg", "image/jpeg")])

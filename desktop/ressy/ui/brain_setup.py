@@ -23,51 +23,52 @@ from PySide6.QtWidgets import (
 from ..config import CLAUDE_MODELS, DEFAULT_LOCAL_LLM_MODEL, LOCAL_LLM_MODELS, LOCAL_STT_MODELS, PROVIDER_NAMES
 from ..paths import resource_path
 from . import theme
+from ..i18n import tr
 
 PROVIDERS: dict[str, dict[str, Any]] = {
     "groq": {
-        "tagline": "Velocissimo, con piano gratuito.",
-        "badge": "Gratis",
-        "placeholder": "gsk_…",
+        "tagline": tr("Velocissimo, con piano gratuito."),
+        "badge": tr("Gratis"),
+        "placeholder": tr("gsk_…"),
         "url": "https://console.groq.com/keys",
         "site": "console.groq.com",
         "models": [
-            ("openai/gpt-oss-120b", "GPT-OSS 120B (consigliato)"),
-            ("openai/gpt-oss-20b", "GPT-OSS 20B (più veloce)"),
-            ("qwen/qwen3.8-27b", "Qwen 3.8 27B"),
+            ("openai/gpt-oss-120b", tr("GPT-OSS 120B (consigliato)")),
+            ("openai/gpt-oss-20b", tr("GPT-OSS 20B (più veloce)")),
+            ("qwen/qwen3.8-27b", tr("Qwen 3.8 27B")),
         ],
     },
     "gemini": {
-        "tagline": "Di Google, piano gratuito generoso.",
-        "badge": "Gratis",
-        "placeholder": "AIza…",
+        "tagline": tr("Di Google, piano gratuito generoso."),
+        "badge": tr("Gratis"),
+        "placeholder": tr("AIza…"),
         "url": "https://aistudio.google.com/apikey",
         "site": "aistudio.google.com",
         "models": [
-            ("gemini-flash-latest", "Gemini Flash, sempre l'ultimo (consigliato)"),
-            ("gemini-flash-lite-latest", "Gemini Flash-Lite (più veloce)"),
-            ("gemini-pro-latest", "Gemini Pro (più capace, più lento)"),
+            ("gemini-flash-latest", tr("Gemini Flash, sempre l'ultimo (consigliato)")),
+            ("gemini-flash-lite-latest", tr("Gemini Flash-Lite (più veloce)")),
+            ("gemini-pro-latest", tr("Gemini Pro (più capace, più lento)")),
         ],
     },
     "openrouter": {
-        "tagline": "Tanti modelli gratis: ottima riserva.",
-        "badge": "Gratis",
-        "placeholder": "sk-or-v1-…",
+        "tagline": tr("Tanti modelli gratis: ottima riserva."),
+        "badge": tr("Gratis"),
+        "placeholder": tr("sk-or-v1-…"),
         "url": "https://openrouter.ai/settings/keys",
         "site": "openrouter.ai",
-        "models": [("auto", "Il miglior modello gratis del giorno (automatico)")],
+        "models": [("auto", tr("Il miglior modello gratis del giorno (automatico)"))],
     },
     "claude": {
-        "tagline": "Il più capace. A consumo, a pagamento.",
-        "badge": "Il più capace",
-        "placeholder": "sk-ant-…",
+        "tagline": tr("Il più capace. A consumo, a pagamento."),
+        "badge": tr("Il più capace"),
+        "placeholder": tr("sk-ant-…"),
         "url": "https://console.anthropic.com/settings/keys",
         "site": "console.anthropic.com",
         "models": list(CLAUDE_MODELS.items()),
     },
     "local": {
-        "tagline": "Gratis e offline, scaricata sul PC.",
-        "badge": "Senza chiave",
+        "tagline": tr("Gratis e offline, scaricata sul PC."),
+        "badge": tr("Senza chiave"),
         "placeholder": "",
         "url": "",
         "site": "",
@@ -75,20 +76,20 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 LOCAL_AI_DETAILS = {
-    "": ("Nessuna", "Solo le chiavi online"),
-    "qwen2.5-0.5b": ("Leggera", "Meno di 500 MB: apre app, siti, musica, meteo"),
-    "qwen2.5-1.5b": ("Consigliata", "Capisce meglio le richieste lunghe, 1-2 secondi"),
+    "": (tr("Nessuna"), tr("Solo le chiavi online")),
+    "qwen2.5-0.5b": (tr("Leggera"), tr("Meno di 500 MB: apre app, siti, musica, meteo")),
+    "qwen2.5-1.5b": (tr("Consigliata"), tr("Capisce meglio le richieste lunghe, 1-2 secondi")),
 }
 
 SPEECH_OPTIONS = {
-    "local": ("Sul PC", "Gratis e senza limiti. Funziona anche offline.", "Consigliato", "pc"),
-    "groq": ("Groq", "Whisper online, il più preciso. Usa la chiave Groq.", "", "groq"),
-    "gemini": ("Gemini", "Online, con la chiave Gemini.", "", "gemini"),
+    "local": (tr("Sul PC"), tr("Gratis e senza limiti. Funziona anche offline."), tr("Consigliato"), "pc"),
+    "groq": ("Groq", tr("Whisper online, il più preciso. Usa la chiave Groq."), "", "groq"),
+    "gemini": ("Gemini", tr("Online, con la chiave Gemini."), "", "gemini"),
 }
 LOCAL_DETAILS = {
-    "tiny-q5_1": "Il più rapido, sbaglia di più",
-    "base-q5_1": "Buon equilibrio, consigliato",
-    "small-q5_1": "Capisce meglio, più lento",
+    "tiny-q5_1": tr("Il più rapido, sbaglia di più"),
+    "base-q5_1": tr("Buon equilibrio, consigliato"),
+    "small-q5_1": tr("Capisce meglio, più lento"),
 }
 
 _renderers: dict[str, QSvgRenderer] = {}
@@ -228,11 +229,11 @@ class ChoiceCard(QAbstractButton):
             else:
                 pill = QRectF(x, (y + 34 + 10) if self.logo else (title_y + title_h + 6), bw, 18)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(theme.BACKLIGHT if self.badge == "Gratis" else theme.LILAC).darker(100))
+            p.setBrush(QColor(theme.BACKLIGHT if self.badge == tr("Gratis") else theme.LILAC).darker(100))
             p.setOpacity(0.16)
             p.drawRoundedRect(pill, 9, 9)
             p.setOpacity(1.0)
-            p.setPen(QColor(theme.BACKLIGHT if self.badge == "Gratis" else theme.LILAC))
+            p.setPen(QColor(theme.BACKLIGHT if self.badge == tr("Gratis") else theme.LILAC))
             p.drawText(pill, Qt.AlignmentFlag.AlignCenter, self.badge)
             body_y = (title_y + title_h + 4) if inline_badge else pill.bottom() + 7
         else:
@@ -318,13 +319,13 @@ class BrainSetup(QWidget):
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.textEdited.connect(self._key_edited)
-        show = QPushButton("Mostra")
+        show = QPushButton(tr("Mostra"))
         show.setCheckable(True)
         show.toggled.connect(lambda on: (
             self.key.setEchoMode(QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password),
-            show.setText("Nascondi" if on else "Mostra"),
+            show.setText(tr("Nascondi") if on else tr("Mostra")),
         ))
-        self.verify_button = QPushButton("Verifica")
+        self.verify_button = QPushButton(tr("Verifica"))
         self.verify_button.clicked.connect(self.verify)
         key_row = QHBoxLayout()
         key_row.setSpacing(8)
@@ -341,11 +342,11 @@ class BrainSetup(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
-        self.key_label = QLabel("Chiave API")
+        self.key_label = QLabel(tr("Chiave API"))
         form.addWidget(self.key_label, 0, 0)
         form.addLayout(key_row, 0, 1)
         form.addWidget(self.status, 1, 1)
-        form.addWidget(QLabel("Modello"), 2, 0)
+        form.addWidget(QLabel(tr("Modello")), 2, 0)
         form.addWidget(self.model, 2, 1)
         form.setColumnStretch(1, 1)
 
@@ -356,8 +357,8 @@ class BrainSetup(QWidget):
         layout.addWidget(self.key_hint)
         layout.addWidget(self.key_box)
         self.keys_hint = _hint(
-            "Puoi inserire <b>più chiavi</b>: scegli una scheda, incolla la chiave, poi torna su quella che vuoi "
-            "usare. Se la prima arriva al limite, Ressy continua con le altre."
+            tr("Puoi inserire <b>più chiavi</b>: scegli una scheda, incolla la chiave, poi torna su quella che vuoi "
+            "usare. Se la prima arriva al limite, Ressy continua con le altre.")
         )
         layout.addWidget(self.keys_hint)
         self.local_ai = LocalAISetup()
@@ -404,7 +405,7 @@ class BrainSetup(QWidget):
         if provider == "local":
             return self.local_ai.problem(required=True)
         if not self.keys[provider].strip():
-            return f"Incolla la chiave API di {PROVIDER_NAMES[provider]} (è gratis crearla)."
+            return tr("Incolla la chiave API di {value} (è gratis crearla).").format(value=PROVIDER_NAMES[provider])
         return self.local_ai.problem(required=False)
 
     def focus_key(self) -> None:
@@ -437,10 +438,10 @@ class BrainSetup(QWidget):
         for name, card in self.cards.cards.items():
             if name == "local":
                 has = self.local_ai.is_ready()
-                status = "Scaricata" if has else ""
+                status = tr("Scaricata") if has else ""
             else:
                 has = bool((self.keys.get(name) or "").strip())
-                status = "Chiave inserita" if has else ""
+                status = tr("Chiave inserita") if has else ""
             if card.status != status:
                 card.status, card.status_ok = status, has
                 card.update()
@@ -467,19 +468,19 @@ class BrainSetup(QWidget):
         if local:
             self.key.setText("")
             self.key_hint.setText(
-                "Ressy pensa con un'AI scaricata su questo PC: gratis, senza chiave e anche senza internet. "
-                "È meno brava dei servizi online, ma per aprire app, siti, musica e meteo basta."
+                tr("Ressy pensa con un'AI scaricata su questo PC: gratis, senza chiave e anche senza internet. "
+                "È meno brava dei servizi online, ma per aprire app, siti, musica e meteo basta.")
             )
             self._set_status("", "")
             return
         info = PROVIDERS[provider]
         name = PROVIDER_NAMES[provider]
-        self.key_label.setText(f"Chiave {name}")
+        self.key_label.setText(tr("Chiave {name}").format(name=name))
         self.key.setPlaceholderText(info["placeholder"])
         self.key.setText(self.keys[provider])
         self.key_hint.setText(
-            f"Ressy pensa con {name} usando la <b>tua</b> chiave: resta su questo PC, cifrata da Windows. "
-            + _link(f"Crea una chiave su {info['site']}", info["url"])
+            tr("Ressy pensa con {name} usando la <b>tua</b> chiave: resta su questo PC, cifrata da Windows. ").format(name=name)
+            + _link(tr("Crea una chiave su {value}").format(value=info['site']), info["url"])
         )
         self._set_status("", "")
         self._fill_models(provider)
@@ -529,10 +530,10 @@ class BrainSetup(QWidget):
         provider = self.provider()
         key = self.key.text().strip()
         if not key:
-            self._set_status("error", "Incolla prima la chiave.")
+            self._set_status("error", tr("Incolla prima la chiave."))
             return
         self.verify_button.setEnabled(False)
-        self._set_status("hint", f"Verifico la chiave con {PROVIDER_NAMES[provider]}…")
+        self._set_status("hint", tr("Verifico la chiave con {value}…").format(value=PROVIDER_NAMES[provider]))
         self._checking = (provider, key)
 
         def work() -> None:
@@ -557,13 +558,13 @@ class BrainSetup(QWidget):
             from ..brain.groq import GroqAuthError
 
             if isinstance(error, GroqAuthError):
-                self._set_status("error", f"{name} ha rifiutato questa chiave: controlla di averla copiata tutta.")
+                self._set_status("error", tr("{name} ha rifiutato questa chiave: controlla di averla copiata tutta.").format(name=name))
             else:
-                self._set_status("error", f"Non riesco a raggiungere {name} ora: controlla la connessione e riprova.")
+                self._set_status("error", tr("Non riesco a raggiungere {name} ora: controlla la connessione e riprova.").format(name=name))
             return
         self._available[provider] = list(models or [])
         self._verified[provider] = key
-        self._set_status("ok", "Chiave valida.")
+        self._set_status("ok", tr("Chiave valida."))
         self._fill_models(provider)
         self.validity.emit(self.is_verified())
 
@@ -595,7 +596,7 @@ class LocalAISetup(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(12)
-        self.download_button = QPushButton("Scarica")
+        self.download_button = QPushButton(tr("Scarica"))
         self.download_button.setObjectName("primary")
         self.download_button.clicked.connect(self._download_clicked)
         self.bar = QProgressBar()
@@ -634,7 +635,7 @@ class LocalAISetup(QWidget):
 
     def set_required(self, required: bool) -> None:
         self._required = required
-        self.title.setText("SCEGLI L'AI SUL PC" if required else "RISERVA GRATUITA SUL PC (FACOLTATIVA)")
+        self.title.setText(tr("SCEGLI L'AI SUL PC") if required else tr("RISERVA GRATUITA SUL PC (FACOLTATIVA)"))
         self.sizes.cards["none"].setVisible(not required)
         if required and self.sizes.value() == "none":
             self.sizes.set_value(DEFAULT_LOCAL_LLM_MODEL)
@@ -646,12 +647,13 @@ class LocalAISetup(QWidget):
 
     def problem(self, *, required: bool) -> str:
         if self._downloading:
-            return "Aspetta che finisca il download dell'AI sul PC."
+            return tr("Aspetta che finisca il download dell'AI sul PC.")
         name = self.value()
         if not name:
-            return "Scegli quale AI scaricare sul PC." if required else ""
+            return tr("Scegli quale AI scaricare sul PC.") if required else ""
         if not self._llm.is_downloaded(name):
-            return "Scarica l'AI sul PC (pulsante «Scarica»)" + ("." if required else ", oppure scegli «Nessuna».")
+            return (tr("Scarica l'AI sul PC (pulsante «Scarica»).") if required
+                    else tr("Scarica l'AI sul PC (pulsante «Scarica»), oppure scegli «Nessuna»."))
         return ""
 
     def _refresh(self) -> None:
@@ -659,34 +661,33 @@ class LocalAISetup(QWidget):
             if name == "none":
                 continue
             if self._downloading == name:
-                card.set_status("Download in corso…")
+                card.set_status(tr("Download in corso…"))
             elif self._llm.is_downloaded(name):
-                card.set_status("Scaricata", ok=True)
+                card.set_status(tr("Scaricata"), ok=True)
             else:
-                card.set_status("Da scaricare")
+                card.set_status(tr("Da scaricare"))
         name = self.value()
         if self._downloading:
-            self.download_button.setText("Annulla")
+            self.download_button.setText(tr("Annulla"))
             self.download_button.setObjectName("")
             self.download_button.show()
             self.bar.show()
         elif not name:
             self.download_button.hide()
             self.bar.hide()
-            self.status.setText("Se tutte le chiavi sono al limite Ressy aspetta che si ricarichino.")
+            self.status.setText(tr("Se tutte le chiavi sono al limite Ressy aspetta che si ricarichino."))
         elif self._llm.is_downloaded(name):
             self.download_button.hide()
             self.bar.hide()
-            self.status.setText(f"<span style='color:{theme.BACKLIGHT}'>AI sul PC pronta</span>: "
-                                "si accende solo quando serve e si spegne da sola dopo 10 minuti.")
+            self.status.setText(tr("<span style='color:{BACKLIGHT}'>AI sul PC pronta</span>: si accende solo quando serve e si spegne da sola dopo 10 minuti.").format(BACKLIGHT=theme.BACKLIGHT))
         else:
             mb = self._llm.download_size_mb(name)
             self.download_button.show()
-            self.download_button.setText(f"Scarica ({self._size_text(mb)})")
+            self.download_button.setText(tr("Scarica ({size_text})").format(size_text=self._size_text(mb)))
             self.download_button.setObjectName("primary")
             self.bar.hide()
-            self.status.setText("Si scarica una volta: il modello Qwen 2.5 (Apache 2.0) e il motore llama.cpp "
-                                "ufficiale. Servono circa 2 GB di RAM libera quando è accesa.")
+            self.status.setText(tr("Si scarica una volta: il modello Qwen 2.5 (Apache 2.0) e il motore llama.cpp "
+                                "ufficiale. Servono circa 2 GB di RAM libera quando è accesa."))
         self.download_button.style().unpolish(self.download_button)
         self.download_button.style().polish(self.download_button)
         self.readiness.emit(self.is_ready())
@@ -703,7 +704,7 @@ class LocalAISetup(QWidget):
         self._cancel = threading.Event()
         cancel = self._cancel
         self.bar.setValue(0)
-        self.status.setText("Scarico l'AI sul PC…")
+        self.status.setText(tr("Scarico l'AI sul PC…"))
         self._refresh()
 
         def work() -> None:
@@ -727,16 +728,16 @@ class LocalAISetup(QWidget):
         if name != self._downloading:
             return
         self.bar.setValue(int(1000 * done / max(1, total)))
-        self.status.setText(f"Scarico l'AI sul PC… {done / 1e6:.0f} di {total / 1e6:.0f} MB")
+        self.status.setText(tr("Scarico l'AI sul PC… {value:.0f} di {value2:.0f} MB").format(value=done / 1e6, value2=total / 1e6))
 
     def _on_downloaded(self, name: str, error: str) -> None:
         self._downloading = ""
         self._refresh()
         if error == "cancelled":
-            self.status.setText("Download annullato.")
+            self.status.setText(tr("Download annullato."))
         elif error:
-            self.status.setText("<span style='color:#FF8C73'>Download non riuscito</span>: "
-                                "controlla la connessione e riprova.")
+            self.status.setText(tr("<span style='color:#FF8C73'>Download non riuscito</span>: "
+                                "controlla la connessione e riprova."))
 
 
 class SpeechSetup(QWidget):
@@ -761,7 +762,7 @@ class SpeechSetup(QWidget):
         self.engines = CardRow(engines)
         self.engines.changed.connect(self._engine_changed)
 
-        sizes = [ChoiceCard(name, f"{label} · {mb} MB", LOCAL_DETAILS.get(name, ""), compact=True,
+        sizes = [ChoiceCard(name, tr("{label} · {mb} MB").format(label=label, mb=mb), LOCAL_DETAILS.get(name, ""), compact=True,
                             badge="")
                  for name, (label, mb) in LOCAL_STT_MODELS.items()]
         self.sizes = CardRow(sizes)
@@ -772,12 +773,12 @@ class SpeechSetup(QWidget):
         lv.setContentsMargins(0, 4, 0, 0)
         lv.setSpacing(10)
         lv.addWidget(_hint(
-            "Il modello si scarica una volta sola dentro la cartella di Ressy; poi la voce non esce dal PC."
+            tr("Il modello si scarica una volta sola dentro la cartella di Ressy; poi la voce non esce dal PC.")
         ))
         lv.addWidget(self.sizes)
         row = QHBoxLayout()
         row.setSpacing(12)
-        self.download_button = QPushButton("Scarica")
+        self.download_button = QPushButton(tr("Scarica"))
         self.download_button.setObjectName("primary")
         self.download_button.clicked.connect(self._download_clicked)
         self.bar = QProgressBar()
@@ -824,20 +825,20 @@ class SpeechSetup(QWidget):
         engine = self.engines.value()
         if engine == "local":
             if self._downloading:
-                return "Aspetta che finisca il download del modello vocale."
+                return tr("Aspetta che finisca il download del modello vocale.")
             if self.download_now and self.needs_download():
-                return "Scarica il modello vocale (pulsante «Scarica»), oppure scegli di capire la voce online."
+                return tr("Scarica il modello vocale (pulsante «Scarica»), oppure scegli di capire la voce online.")
             return ""
         if keys is not None and not (keys.get(engine) or "").strip():
-            return f"Per capire la voce con {PROVIDER_NAMES[engine]} serve anche la sua chiave (pagina Intelligenza)."
+            return tr("Per capire la voce con {value} serve anche la sua chiave (pagina Intelligenza).").format(value=PROVIDER_NAMES[engine])
         return ""
 
     def _engine_changed(self, engine: str) -> None:
         self.local_box.setVisible(engine == "local")
         texts = {
-            "groq": "La voce viene inviata a Groq (Whisper large v3) con la tua chiave Groq: è il più preciso, "
-                    "ma conta nei limiti del tuo piano gratuito.",
-            "gemini": "La voce viene inviata a Gemini con la tua chiave Gemini.",
+            "groq": tr("La voce viene inviata a Groq (Whisper large v3) con la tua chiave Groq: è il più preciso, "
+                    "ma conta nei limiti del tuo piano gratuito."),
+            "gemini": tr("La voce viene inviata a Gemini con la tua chiave Gemini."),
         }
         self.online_hint.setText(texts.get(engine, ""))
         self.online_hint.setVisible(engine in texts)
@@ -846,29 +847,29 @@ class SpeechSetup(QWidget):
     def _refresh(self) -> None:
         for name, card in self.sizes.cards.items():
             if self._downloading == name:
-                card.set_status("Download in corso…")
+                card.set_status(tr("Download in corso…"))
             elif self._local.is_downloaded(name):
-                card.set_status("Scaricato", ok=True)
+                card.set_status(tr("Scaricato"), ok=True)
             else:
-                card.set_status("Da scaricare")
+                card.set_status(tr("Da scaricare"))
         name = self.sizes.value()
         mb = LOCAL_STT_MODELS[name][1]
         if self._downloading:
-            self.download_button.setText("Annulla")
+            self.download_button.setText(tr("Annulla"))
             self.download_button.setObjectName("")
             self.bar.show()
         elif self._local.is_downloaded(name):
             self.download_button.hide()
             self.bar.hide()
-            self.download_status.setText(f"<span style='color:{theme.BACKLIGHT}'>Modello pronto</span> ({mb} MB).")
+            self.download_status.setText(tr("<span style='color:{BACKLIGHT}'>Modello pronto</span> ({mb} MB).").format(BACKLIGHT=theme.BACKLIGHT, mb=mb))
         else:
             self.download_button.show()
-            self.download_button.setText(f"Scarica ({mb} MB)")
+            self.download_button.setText(tr("Scarica ({mb} MB)").format(mb=mb))
             self.download_button.setObjectName("primary")
             self.bar.hide()
             self.download_status.setText(
-                "Si scaricherà durante l'installazione." if not self.download_now
-                else f"Da scaricare: circa {mb} MB."
+                tr("Si scaricherà durante l'installazione.") if not self.download_now
+                else tr("Da scaricare: circa {mb} MB.").format(mb=mb)
             )
             if not self.download_now:
                 self.download_button.hide()
@@ -887,7 +888,7 @@ class SpeechSetup(QWidget):
         self._cancel = threading.Event()
         cancel = self._cancel
         self.bar.setValue(0)
-        self.download_status.setText("Scarico il modello…")
+        self.download_status.setText(tr("Scarico il modello…"))
         self.download_button.show()
         self._refresh()
 
@@ -906,16 +907,16 @@ class SpeechSetup(QWidget):
         if name != self._downloading:
             return
         self.bar.setValue(int(1000 * done / max(1, total)))
-        self.download_status.setText(f"Scarico il modello… {done / 1e6:.0f} di {total / 1e6:.0f} MB")
+        self.download_status.setText(tr("Scarico il modello… {value:.0f} di {value2:.0f} MB").format(value=done / 1e6, value2=total / 1e6))
 
     def _on_downloaded(self, name: str, error: str) -> None:
         self._downloading = ""
         self._refresh()
         if error == "cancelled":
-            self.download_status.setText("Download annullato.")
+            self.download_status.setText(tr("Download annullato."))
         elif error:
             self.download_status.setText(
-                f"<span style='color:#FF8C73'>Download non riuscito</span>: controlla la connessione e riprova."
+                tr("<span style='color:#FF8C73'>Download non riuscito</span>: controlla la connessione e riprova.").format()
             )
 
     def cancel_download(self) -> None:

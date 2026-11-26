@@ -16,6 +16,7 @@ from ..speech.textnorm import normalize
 from . import screen, winapi
 from .apps import _matching_windows, launch
 from .registry import Tool, ToolContext, ToolError, params
+from ..i18n import N_, language, tr
 
 log = logging.getLogger("ressy.more")
 
@@ -41,7 +42,7 @@ def _home() -> Path:
 def resolve_path(name: str, folder: str = "") -> Path:
     name = name.strip().strip('"')
     if not name:
-        raise ToolError("Manca il nome del file.")
+        raise ToolError(tr("Manca il nome del file."))
     key = normalize(folder) if folder else ""
     if key in FOLDERS:
         base = Path(winapi.known_folder(FOLDERS[key]) or _home() / "Desktop")
@@ -62,68 +63,157 @@ def resolve_path(name: str, folder: str = "") -> Path:
         path = base / path
     path = path.resolve()
     if any(_BAD_NAME.search(part) for part in path.parts[1:]):
-        raise ToolError("Il nome del file contiene caratteri non ammessi.")
+        raise ToolError(tr("Il nome del file contiene caratteri non ammessi."))
     home = _home()
     if path != home and home not in path.parents:
-        raise ToolError("Per sicurezza creo e leggo file solo dentro la tua cartella utente.")
+        raise ToolError(tr("Per sicurezza creo e leggo file solo dentro la tua cartella utente."))
     if any(part.lower() in ("appdata",) for part in path.relative_to(home).parts[:1]):
-        raise ToolError("Non tocco i file di sistema delle app (AppData).")
+        raise ToolError(tr("Non tocco i file di sistema delle app (AppData)."))
     return path
 
 
 def create_file(ctx: ToolContext, args: dict) -> str:
     content = args.get("content") or ""
     if len(content) > MAX_FILE_CHARS:
-        raise ToolError("Il contenuto è troppo lungo.")
+        raise ToolError(tr("Il contenuto è troppo lungo."))
     path = resolve_path(args["name"], args.get("folder") or "")
     if not path.suffix:
         path = path.with_suffix(".txt")
     mode = args.get("mode") or "create"
     if path.exists() and mode == "create":
-        raise ToolError(f"Esiste già un file {path.name}: dimmi se sovrascriverlo (overwrite) o aggiungere in fondo (append).")
+        raise ToolError(tr("Esiste già un file {name}: dimmi se sovrascriverlo (overwrite) o aggiungere in fondo (append).").format(name=path.name))
     path.parent.mkdir(parents=True, exist_ok=True)
     if mode == "append" and path.exists():
         with path.open("a", encoding="utf-8", newline="") as handle:
             handle.write(("\n" if not content.startswith("\n") else "") + content)
-        verb = "Ho aggiunto il testo a"
+        done = tr("Ho aggiunto il testo a {name} in {parent}.")
     else:
         encoding = "utf-8-sig" if path.suffix.lower() in (".txt", ".csv") else "utf-8"
         path.write_text(content, encoding=encoding, newline="")
-        verb = "Ho creato"
+        done = tr("Ho creato {name} in {parent}.")
     if args.get("open"):
         os.startfile(str(path))
-    return f"{verb} {path.name} in {path.parent}."
+    return done.format(name=path.name, parent=path.parent)
+
+
+_PLACES = {"desktop": (N_("sul Desktop"), N_("Desktop")), "documents": (N_("in Documenti"), N_("Documenti")),
+           "downloads": (N_("in Download"), N_("Download")), "pictures": (N_("in Immagini"), N_("Immagini")),
+           "music": (N_("in Musica"), N_("Musica")), "videos": (N_("in Video"), N_("Video"))}
+
+
+def _known_places() -> list[tuple[Path, str, str]]:
+    places = []
+    for key, (said, shown) in _PLACES.items():
+        known = winapi.known_folder(key)
+        if known:
+            places.append((Path(known).resolve(), tr(said), tr(shown)))
+    return places
+
+
+def where(folder: Path) -> str:
+    for base, said, shown in _known_places():
+        if folder == base:
+            return said
+        if base in folder.parents:
+            return f"in {shown}{os.sep}{folder.relative_to(base)}"
+    return f"in {folder}"
 
 
 def create_folder(ctx: ToolContext, args: dict) -> str:
     path = resolve_path(args["name"], args.get("folder") or "")
     existed = path.exists()
     path.mkdir(parents=True, exist_ok=True)
-    return f"La cartella {path.name} {'esisteva già' if existed else 'è stata creata'} in {path.parent}."
+    if existed:
+        return tr("La cartella {name} esisteva già {where}.").format(name=path.name, where=where(path.parent))
+    return tr("La cartella {name} è stata creata {where}.").format(name=path.name, where=where(path.parent))
+
+
+def file_action(ctx: ToolContext, args: dict) -> str:
+    import shutil
+
+    action = args["action"]
+    source = resolve_path(args["name"], args.get("folder") or "")
+    if not source.exists():
+        raise ToolError(tr("Non trovo «{name}» {where}.").format(name=source.name, where=where(source.parent)))
+    protected = {_home(), *(base for base, _, _ in _known_places())}
+    if source in protected or (source.parent == _home() and source.is_dir()):
+        raise ToolError(tr("È una delle cartelle principali del tuo utente: non la sposto e non la cancello."))
+    kind = tr("la cartella") if source.is_dir() else tr("il file")
+    if action == "delete":
+        if not winapi.recycle(str(source)):
+            raise ToolError(tr("Windows non mi ha permesso di cestinare {kind} {name}.").format(kind=kind, name=source.name))
+        return tr("Ho spostato {kind} {name} nel Cestino (si può ripristinare da lì).").format(kind=kind, name=source.name)
+    if action == "rename":
+        new_name = (args.get("new_name") or "").strip()
+        if not new_name or _BAD_NAME.search(new_name) or "\\" in new_name or "/" in new_name:
+            raise ToolError(tr("Dimmi il nuovo nome (senza caratteri come / : * ?)."))
+        if source.is_file() and not Path(new_name).suffix:
+            new_name += source.suffix
+        target = source.with_name(new_name)
+        if target.exists():
+            raise ToolError(tr("Esiste già qualcosa che si chiama {new_name} lì.").format(new_name=new_name))
+        source.rename(target)
+        return tr("Ho rinominato {kind} {name} in {name2}.").format(kind=kind, name=source.name, name2=target.name)
+    destination = (args.get("destination") or "").strip()
+    if not destination:
+        raise ToolError(tr("In quale cartella devo metterlo?"))
+    folder = resolve_path(".", destination)
+    if folder == source or source in folder.parents:
+        raise ToolError(tr("Non posso metterlo dentro se stesso."))
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / source.name
+    if target.exists():
+        raise ToolError(tr("In {name} c'è già {name2}.").format(name=folder.name, name2=target.name))
+    if action == "move":
+        shutil.move(str(source), str(target))
+        return tr("Ho spostato {kind} {name} {where}.").format(kind=kind, name=source.name, where=where(folder))
+    if source.is_dir():
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
+    return tr("Ho copiato {kind} {name} {where}.").format(kind=kind, name=source.name, where=where(folder))
+
+
+def wait(ctx: ToolContext, args: dict) -> str:
+    from .apps import wait_until_ready
+
+    app = (args.get("app") or "").strip()
+    if app:
+        seconds = max(1.0, min(90.0, float(args.get("seconds") or 60)))
+        window = wait_until_ready(app, set(), seconds)
+        if window is None:
+            raise ToolError(tr("{app} non si è aperto entro {int} secondi.").format(app=app, int=int(seconds)))
+        return tr("{app} è aperto e pronto.").format(app=app)
+    seconds = float(args.get("seconds") or 0)
+    if seconds <= 0:
+        raise ToolError(tr("Quanti secondi devo aspettare?"))
+    seconds = min(seconds, 120.0)
+    time.sleep(seconds)
+    return tr("Ho aspettato {seconds:g} secondi.").format(seconds=seconds)
 
 
 def read_file(ctx: ToolContext, args: dict) -> str:
     path = resolve_path(args["name"], args.get("folder") or "")
     if not path.is_file():
-        raise ToolError(f"Non trovo il file {path.name}.")
+        raise ToolError(tr("Non trovo il file {name}.").format(name=path.name))
     if path.stat().st_size > 5_000_000:
-        raise ToolError("Il file è troppo grande da leggere.")
+        raise ToolError(tr("Il file è troppo grande da leggere."))
     data = path.read_bytes()
     if b"\x00" in data[:4096]:
-        raise ToolError("Non è un file di testo.")
+        raise ToolError(tr("Non è un file di testo."))
     text = data.decode("utf-8-sig", errors="replace")
     more = f"\n[… altri {len(text) - READ_LIMIT} caratteri]" if len(text) > READ_LIMIT else ""
-    return f"Contenuto di {path.name}:\n{text[:READ_LIMIT]}{more}"
+    return tr("Contenuto di {name}:\n{value}{more}").format(name=path.name, value=text[:READ_LIMIT], more=more)
 
 
 def list_folder(ctx: ToolContext, args: dict) -> str:
     path = resolve_path(args.get("name") or ".", args.get("folder") or "desktop")
     if not path.is_dir():
-        raise ToolError("Non è una cartella.")
+        raise ToolError(tr("Non è una cartella."))
     entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
     names = [(p.name + "\\") if p.is_dir() else p.name for p in entries[:60]]
     more = f" (e altri {len(entries) - 60})" if len(entries) > 60 else ""
-    return f"In {path}: " + (", ".join(names) if names else "vuota") + more
+    return tr("In {path}: ").format(path=path) + (", ".join(names) if names else "vuota") + more
 
 
 def _wait_window(name: str, timeout: float) -> winapi.Window | None:
@@ -140,9 +230,9 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
     app = args["app"].strip()
     text = args["text"]
     if len(text) > 20_000:
-        raise ToolError("Testo troppo lungo.")
+        raise ToolError(tr("Testo troppo lungo."))
     if not winapi.input_desktop_available():
-        raise ToolError("Il PC è bloccato: non posso scrivere finché non viene sbloccato.")
+        raise ToolError(tr("Il PC è bloccato: non posso scrivere finché non viene sbloccato."))
     window = _wait_window(app, 0)
     if window is None:
         entry, alternatives = ctx.services.apps.find(app)
@@ -150,17 +240,17 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
             builtin = {"blocco note": "notepad.exe", "notepad": "notepad.exe", "wordpad": "write.exe"}.get(normalize(app))
             if builtin is None:
                 names = ", ".join(a.name for a in alternatives[:4])
-                raise ToolError(f"Non trovo l'app '{app}'." + (f" Forse: {names}?" if names else ""))
+                raise ToolError(tr("Non trovo l'app '{app}'.").format(app=app) + (tr(" Forse: {names}?").format(names=names) if names else ""))
             os.startfile(builtin)
         else:
             launch(entry)
         window = _wait_window(app, 25)
         if window is None:
-            raise ToolError(f"{app} non si è aperto in tempo.")
+            raise ToolError(tr("{app} non si è aperto in tempo.").format(app=app))
         time.sleep(1.5)
     winapi.wait_modifiers_released()
     if not winapi.focus_window(window.hwnd):
-        raise ToolError(f"Non riesco a portare {app} in primo piano.")
+        raise ToolError(tr("Non riesco a portare {app} in primo piano.").format(app=app))
     time.sleep(0.4)
     if args.get("new_document"):
         winapi.hotkey(winapi.VK["ctrl"], winapi.VK["n"])
@@ -173,7 +263,7 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
         winapi.type_text(text)
     time.sleep(0.3)
     if winapi.foreground_window() != target:
-        raise ToolError(f"{app} ha perso il focus mentre scrivevo: controlla il testo.")
+        raise ToolError(tr("{app} ha perso il focus mentre scrivevo: controlla il testo.").format(app=app))
     if args.get("save_as"):
         winapi.hotkey(winapi.VK["ctrl"], winapi.VK["s"])
         time.sleep(1.2)
@@ -181,55 +271,55 @@ def write_in_app(ctx: ToolContext, args: dict) -> str:
         winapi.tap(winapi.VK["enter"])
         time.sleep(0.8)
     title = winapi.window_title(winapi.foreground_window())
-    return f"Ho scritto il testo in «{title[:60]}»." if title else f"Ho scritto il testo in {app}."
+    return tr("Ho scritto il testo in «{value}».").format(value=title[:60]) if title else tr("Ho scritto il testo in {app}.").format(app=app)
 
 
 def read_screen(ctx: ToolContext, args: dict) -> str:
     if not screen.ocr_available():
-        raise ToolError("Il riconoscimento del testo di Windows non è disponibile.")
+        raise ToolError(tr("Il riconoscimento del testo di Windows non è disponibile."))
     region = None
     if args.get("app"):
         windows = _matching_windows(args["app"])
         if not windows:
-            raise ToolError(f"Non vedo finestre di '{args['app']}'.")
+            raise ToolError(tr("Non vedo finestre di '{value}'.").format(value=args['app']))
         region = winapi.window_rect(windows[0].hwnd)
     lines = screen.read_text(region)
     text = "\n".join(line.text for line in lines)
     if not text.strip():
-        return "Non leggo testo sullo schermo."
-    return "Testo visibile (OCR, può contenere errori):\n" + text[:READ_LIMIT]
+        return tr("Non leggo testo sullo schermo.")
+    return tr("Testo visibile (OCR, può contenere errori):\n") + text[:READ_LIMIT]
 
 
 def click_text(ctx: ToolContext, args: dict) -> str:
     wanted = args["text"].strip()
     if not wanted:
-        raise ToolError("Cosa devo cliccare?")
+        raise ToolError(tr("Cosa devo cliccare?"))
     if not winapi.input_desktop_available():
-        raise ToolError("Il PC è bloccato.")
+        raise ToolError(tr("Il PC è bloccato."))
     region = None
     if args.get("app"):
         windows = _matching_windows(args["app"])
         if not windows:
-            raise ToolError(f"Non vedo finestre di '{args['app']}'.")
+            raise ToolError(tr("Non vedo finestre di '{value}'.").format(value=args['app']))
         winapi.focus_window(windows[0].hwnd)
         time.sleep(0.4)
         region = winapi.window_rect(windows[0].hwnd)
     found = screen.find_text(screen.read_text(region), wanted, threshold=0.8)
     if found is None:
-        raise ToolError(f"Non vedo «{wanted}» sullo schermo.")
+        raise ToolError(tr("Non vedo «{wanted}» sullo schermo.").format(wanted=wanted))
     score, line, (x, y) = found
     winapi.click(x, y, double=bool(args.get("double")), right=bool(args.get("right")))
     time.sleep(0.5)
-    return f"Ho cliccato su «{line.text[:60]}»."
+    return tr("Ho cliccato su «{value}».").format(value=line.text[:60])
 
 
 WEATHER_CODES = {
-    0: "sereno", 1: "quasi sereno", 2: "parzialmente nuvoloso", 3: "nuvoloso", 45: "nebbia", 48: "nebbia con brina",
-    51: "pioviggine leggera", 53: "pioviggine", 55: "pioviggine intensa", 56: "pioviggine gelata", 57: "pioviggine gelata",
-    61: "pioggia leggera", 63: "pioggia", 65: "pioggia forte", 66: "pioggia gelata", 67: "pioggia gelata forte",
-    71: "neve leggera", 73: "neve", 75: "neve forte", 77: "nevischio", 80: "rovesci leggeri", 81: "rovesci",
-    82: "rovesci violenti", 85: "rovesci di neve", 86: "forti rovesci di neve", 95: "temporale",
-    96: "temporale con grandine", 99: "temporale con grandine forte",
+    0: N_("sereno"), 1: N_("quasi sereno"), 2: N_("parzialmente nuvoloso"), 3: N_("nuvoloso"), 45: N_("nebbia"), 48: N_("nebbia con brina"),
+    51: N_("pioviggine leggera"), 53: N_("pioviggine"), 55: N_("pioviggine intensa"), 56: N_("pioviggine gelata"), 57: N_("pioviggine gelata"),
+    61: N_("pioggia leggera"), 63: N_("pioggia"), 65: N_("pioggia forte"), 66: N_("pioggia gelata"), 67: N_("pioggia gelata forte"),
+    71: N_("neve leggera"), 73: N_("neve"), 75: N_("neve forte"), 77: N_("nevischio"), 80: N_("rovesci leggeri"), 81: N_("rovesci"),
+    82: N_("rovesci violenti"), 85: N_("rovesci di neve"), 86: N_("forti rovesci di neve"), 95: N_("temporale"),
+    96: N_("temporale con grandine"), 99: N_("temporale con grandine forte"),
 }
 
 
@@ -240,13 +330,13 @@ def _place_cache() -> Path:
 def _geocode(city: str) -> tuple[float, float, str]:
     response = httpx.get(
         "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "it", "format": "json"},
+        params={"name": city, "count": 1, "language": language(), "format": "json"},
         timeout=8,
     )
     response.raise_for_status()
     results = response.json().get("results") or []
     if not results:
-        raise ToolError(f"Non trovo la città «{city}».")
+        raise ToolError(tr("Non trovo la città «{city}».").format(city=city))
     r = results[0]
     label = ", ".join(x for x in (r.get("name"), r.get("admin1"), r.get("country")) if x)
     return float(r["latitude"]), float(r["longitude"]), label
@@ -267,8 +357,8 @@ def _home_place(ctx: ToolContext) -> tuple[float, float, str]:
     response.raise_for_status()
     data = response.json()
     if "latitude" not in data:
-        raise ToolError("Non so dove sei: dimmi la città.")
-    label = ", ".join(x for x in (data.get("city"), data.get("region")) if x) or "la tua zona"
+        raise ToolError(tr("Non so dove sei: dimmi la città."))
+    label = ", ".join(x for x in (data.get("city"), data.get("region")) if x) or tr("la tua zona")
     place = {"lat": data["latitude"], "lon": data["longitude"], "label": label, "at": time.time()}
     try:
         cache.write_text(json.dumps(place), encoding="utf-8")
@@ -299,22 +389,24 @@ def weather(ctx: ToolContext, args: dict) -> str:
         response.raise_for_status()
         data = response.json()
     except httpx.HTTPError as exc:
-        raise ToolError("Il servizio meteo non risponde, riprova tra poco.") from exc
+        raise ToolError(tr("Il servizio meteo non risponde, riprova tra poco.")) from exc
     cur = data["current"]
+    sky = WEATHER_CODES.get(int(cur["weather_code"]))
     parts = [
-        f"Meteo a {label} adesso: {WEATHER_CODES.get(int(cur['weather_code']), 'condizioni variabili')}, "
-        f"{round(cur['temperature_2m'])}°C (percepiti {round(cur['apparent_temperature'])}°C), "
-        f"umidità {cur['relative_humidity_2m']}%, vento {round(cur['wind_speed_10m'])} km/h."
+        tr("Meteo a {label} adesso: {sky}, {temp}°C (percepiti {feels}°C), umidità {humidity}%, vento {wind} km/h.").format(
+            label=label, sky=tr(sky) if sky else tr("condizioni variabili"), temp=round(cur["temperature_2m"]),
+            feels=round(cur["apparent_temperature"]), humidity=cur["relative_humidity_2m"],
+            wind=round(cur["wind_speed_10m"]))
     ]
     daily = data["daily"]
-    names = ["oggi", "domani"]
+    names = [tr("oggi"), tr("domani")]
     for i, day in enumerate(daily["time"]):
-        when = names[i] if i < 2 else dt.date.fromisoformat(day).strftime("%d/%m")
+        when = names[i] if i < 2 else dt.date.fromisoformat(day).strftime(tr("%d/%m"))
         rain = daily["precipitation_probability_max"][i]
+        sky = WEATHER_CODES.get(int(daily["weather_code"][i]))
         parts.append(
-            f"{when.capitalize()}: {WEATHER_CODES.get(int(daily['weather_code'][i]), 'variabile')}, "
-            f"min {round(daily['temperature_2m_min'][i])}° max {round(daily['temperature_2m_max'][i])}°"
-            + (f", pioggia {rain}%" if rain is not None else "")
+            tr("{capitalize}: {get}, min {round}° max {round2}°").format(capitalize=when.capitalize(), get=tr(sky) if sky else tr("variabile"), round=round(daily['temperature_2m_min'][i]), round2=round(daily['temperature_2m_max'][i]))
+            + (tr(", pioggia {rain}%").format(rain=rain) if rain is not None else "")
             + "."
         )
     return " ".join(parts)
@@ -332,11 +424,11 @@ _DANGEROUS = re.compile(
 def run_powershell(ctx: ToolContext, args: dict) -> str:
     command = args["command"].strip()
     if not command:
-        raise ToolError("Comando vuoto.")
+        raise ToolError(tr("Comando vuoto."))
     if len(command) > 4000:
-        raise ToolError("Comando troppo lungo.")
+        raise ToolError(tr("Comando troppo lungo."))
     if _DANGEROUS.search(command):
-        raise ToolError("Questo comando può danneggiare il PC o i dati: non lo eseguo. Fallo tu se sei sicuro.")
+        raise ToolError(tr("Questo comando può danneggiare il PC o i dati: non lo eseguo. Fallo tu se sei sicuro."))
     log.info("powershell: %d characters", len(command))
     try:
         result = subprocess.run(
@@ -348,13 +440,13 @@ def run_powershell(ctx: ToolContext, args: dict) -> str:
             cwd=str(_home()),
         )
     except subprocess.TimeoutExpired as exc:
-        raise ToolError("Il comando ha impiegato più di 60 secondi ed è stato interrotto.") from exc
+        raise ToolError(tr("Il comando ha impiegato più di 60 secondi ed è stato interrotto.")) from exc
     out = result.stdout.decode("utf-8", errors="replace").strip()
     err = result.stderr.decode("utf-8", errors="replace").strip()
-    text = out[:READ_LIMIT] or "(nessun output)"
+    text = out[:READ_LIMIT] or tr("(nessun output)")
     if result.returncode != 0:
-        raise ToolError(f"Il comando è fallito (codice {result.returncode}): {(err or out)[:1500]}")
-    return text + (f"\n[avvisi: {err[:500]}]" if err else "")
+        raise ToolError(tr("Il comando è fallito (codice {returncode}): {value}").format(returncode=result.returncode, value=(err or out)[:1500]))
+    return text + (tr("\n[avvisi: {value}]").format(value=err[:500]) if err else "")
 
 
 TOOLS = [
@@ -379,6 +471,29 @@ TOOLS = [
         "Crea una cartella (default sul desktop).",
         params({"name": {"type": "string"}, "folder": {"type": "string"}}, ["name"]),
         create_folder,
+    ),
+    Tool(
+        "file_action",
+        "Rinomina, sposta, copia o cestina (nel Cestino, recuperabile) un file o una cartella dell'utente.",
+        params(
+            {
+                "action": {"type": "string", "enum": ["rename", "move", "copy", "delete"]},
+                "name": {"type": "string", "description": "file o cartella, es. foto.png"},
+                "folder": {"type": "string", "description": "dove si trova: desktop (default), documenti… o un percorso"},
+                "new_name": {"type": "string", "description": "per rename"},
+                "destination": {"type": "string", "description": "cartella di arrivo, per move e copy"},
+            },
+            ["action", "name"],
+        ),
+        file_action,
+        timeout=120,
+    ),
+    Tool(
+        "wait",
+        "Aspetta prima dell'azione successiva: seconds (1-120) oppure app = finché quel programma è aperto e pronto.",
+        params({"seconds": {"type": "number"}, "app": {"type": "string"}}),
+        wait,
+        timeout=130,
     ),
     Tool(
         "read_file",
@@ -408,6 +523,7 @@ TOOLS = [
         write_in_app,
         timeout=120,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
     Tool(
         "read_screen",
@@ -429,6 +545,7 @@ TOOLS = [
         ),
         click_text,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
     Tool(
         "weather",

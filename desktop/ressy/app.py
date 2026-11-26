@@ -11,7 +11,8 @@ import threading
 from . import APP_NAME, __version__
 from .config import Settings
 from .log import setup_logging
-from .system_integration import SingleInstance
+from .system_integration import SingleInstance, relaunch, wait_for_exit
+from .i18n import language, saved_language, tr
 
 log = logging.getLogger("ressy.app")
 
@@ -24,13 +25,14 @@ def _server_name() -> str:
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="ressy", description="Ressy, l'assistente vocale per Windows.")
+    parser = argparse.ArgumentParser(prog="ressy", description=tr("Ressy, l'assistente vocale per Windows."))
     parser.add_argument("--background", action="store_true", help="avvio silenzioso (solo icona nell'area di notifica)")
     parser.add_argument("--debug", action="store_true", help="registri dettagliati")
     parser.add_argument("--server", action="store_true", help="avvia il server del tuo bot (self-host), senza finestre")
     parser.add_argument("--server-stop", action="store_true", help="ferma il server del bot")
     parser.add_argument("--uninstall", action="store_true", help="disinstalla Ressy")
     parser.add_argument("--quiet", action="store_true", help="con --uninstall: senza domande")
+    parser.add_argument("--after", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--version", action="version", version=f"Ressy {__version__}")
     return parser.parse_args(argv)
 
@@ -93,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_uninstall(app, quiet=args.quiet)
 
+    if args.after:
+        wait_for_exit(args.after)
     instance = SingleInstance()
     if instance.already_running:
         _ask_running_instance_to_show()
@@ -115,11 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyleSheet(theme.stylesheet())
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, "Ressy", "L'area di notifica di Windows non è disponibile: Ressy non può partire.")
+        QMessageBox.critical(None, "Ressy", tr("L'area di notifica di Windows non è disponibile: Ressy non può partire."))
         return 1
 
     settings = Settings.load()
-    if settings.ensure_identity():
+    changed = settings.ensure_identity()
+    if not saved_language():
+        settings.use_language(language())
+        changed = True
+    if changed:
         settings.save()
 
     bridge = UiBridge()
@@ -133,10 +141,17 @@ def main(argv: list[str] | None = None) -> int:
             dialog = windows["pair"] = PairDialog(controller, bridge)
         dialog.open_and_request()
 
+    def restart() -> None:
+        if relaunch():
+            log.info("restarting")
+            app.quit()
+
     def open_settings(reason: str = "") -> None:
         dialog = windows.get("settings")
         if dialog is None:
-            dialog = windows["settings"] = SettingsDialog(controller, bridge, open_pairing=open_pairing)
+            dialog = windows["settings"] = SettingsDialog(
+                controller, bridge, open_pairing=open_pairing, restart=restart
+            )
         dialog.open_with(reason)
 
     tray = Tray(controller, bridge, open_settings=open_settings, open_pairing=open_pairing, quit_app=app.quit)
@@ -151,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def on_update(release) -> None:
         update_checker.release = release
-        update_action.setText(f"Aggiorna Ressy alla versione {release.version}…")
+        update_action.setText(tr("Aggiorna Ressy alla versione {version}…").format(version=release.version))
         update_action.setVisible(True)
         if release.version not in offered:
             offered.add(release.version)
@@ -194,14 +209,13 @@ def main(argv: list[str] | None = None) -> int:
         settings.save()
 
     if just_updated:
-        tray.toast("Ressy aggiornata", f"Ora hai la versione {__version__}.")
+        tray.toast(tr("Ressy aggiornata"), tr("Ora hai la versione {version}.").format(version=__version__))
     if not settings.brain_ready:
         open_settings(
-            "Benvenuto! Per iniziare scegli l'intelligenza di Ressy (Groq, Gemini, OpenRouter o Claude) e incolla la chiave. Poi tieni premuto "
-            f"{settings.hotkey_name} e di' «Ressy, sveglia!»."
+            tr("Benvenuto! Per iniziare scegli l'intelligenza di Ressy (Groq, Gemini, OpenRouter o Claude) e incolla la chiave. Poi tieni premuto {hotkey_name} e di' «Ressy, sveglia!».").format(hotkey_name=settings.hotkey_name)
         )
     elif not args.background:
-        tray.toast("Ressy è pronta", f"Tieni premuto {settings.hotkey_name} e di' «Ressy, sveglia!»")
+        tray.toast(tr("Ressy è pronta"), tr("Tieni premuto {hotkey_name} e di' «Ressy, sveglia!»").format(hotkey_name=settings.hotkey_name))
 
     code = app.exec()
     log.info("Ressy stopped (%s)", code)

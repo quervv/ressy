@@ -11,6 +11,7 @@ import numpy as np
 from . import devices
 from .meter import Meter
 from .pcm import StreamResampler, level_from_dbfs, rms_dbfs
+from ..i18n import tr
 
 log = logging.getLogger("ressy.mic")
 
@@ -87,7 +88,7 @@ class Microphone:
                     )
                     log.info("microphone opened at %d Hz (resampling to 16 kHz)", native)
                 except Exception as exc:
-                    raise MicError(f"Impossibile aprire il microfono: {exc}") from exc
+                    raise MicError(tr("Impossibile aprire il microfono: {exc}").format(exc=exc)) from exc
             session.stream = stream
             session.thread = threading.Thread(target=self._consume, args=(session,), name="mic-consumer", daemon=True)
             session.thread.start()
@@ -96,7 +97,7 @@ class Microphone:
             except Exception as exc:
                 session.stop.set()
                 stream.close()
-                raise MicError(f"Impossibile avviare il microfono: {exc}") from exc
+                raise MicError(tr("Impossibile avviare il microfono: {exc}").format(exc=exc)) from exc
             self._session = session
             log.debug("microphone started")
 

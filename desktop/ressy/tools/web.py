@@ -9,6 +9,7 @@ import webbrowser
 import httpx
 
 from .registry import Tool, ToolContext, ToolError, params
+from ..i18n import language, tr
 
 log = logging.getLogger("ressy.web")
 
@@ -55,29 +56,29 @@ def normalize_url(raw: str) -> str:
     if parsed.scheme in ("http", "https") and parsed.netloc:
         return text
     if parsed.scheme and parsed.scheme not in ("http", "https") and "." not in parsed.scheme:
-        raise ToolError("Apro solo indirizzi web (http/https).")
+        raise ToolError(tr("Apro solo indirizzi web (http/https)."))
     if " " not in text and _DOMAIN.match(text):
         return "https://" + text
-    raise ToolError(f"'{raw}' non sembra un indirizzo web.")
+    raise ToolError(tr("'{raw}' non sembra un indirizzo web.").format(raw=raw))
 
 
 def _open(url: str) -> None:
     if not webbrowser.open(url, new=2):
-        raise ToolError("Non riesco ad aprire il browser predefinito.")
+        raise ToolError(tr("Non riesco ad aprire il browser predefinito."))
 
 
 def open_url(ctx: ToolContext, args: dict) -> str:
     url = normalize_url(args["url"])
     _open(url)
-    return f"Ho aperto {urllib.parse.urlparse(url).netloc or url} nel browser."
+    return tr("Ho aperto {value} nel browser.").format(value=urllib.parse.urlparse(url).netloc or url)
 
 
 def web_search(ctx: ToolContext, args: dict) -> str:
     query = args["query"].strip()
     if not query:
-        raise ToolError("Cosa devo cercare?")
+        raise ToolError(tr("Cosa devo cercare?"))
     _open("https://www.google.com/search?q=" + urllib.parse.quote_plus(query))
-    return f"Ho cercato «{query}» su Google nel browser."
+    return tr("Ho cercato «{query}» su Google nel browser.").format(query=query)
 
 
 def first_youtube_video(html: str) -> tuple[str, str] | None:
@@ -97,13 +98,14 @@ def first_youtube_video(html: str) -> tuple[str, str] | None:
 def play_youtube(ctx: ToolContext, args: dict) -> str:
     query = args["query"].strip()
     if not query:
-        raise ToolError("Cosa devo cercare su YouTube?")
+        raise ToolError(tr("Cosa devo cercare su YouTube?"))
     results_url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
     found = None
     try:
         response = httpx.get(
             results_url,
-            headers={"User-Agent": _UA, "Accept-Language": "it-IT,it;q=0.9,en;q=0.6"},
+            headers={"User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9,it;q=0.5" if language() == "en"
+                     else "it-IT,it;q=0.9,en;q=0.6"},
             timeout=8.0,
             follow_redirects=True,
         )
@@ -113,19 +115,19 @@ def play_youtube(ctx: ToolContext, args: dict) -> str:
         log.info("YouTube lookup failed, opening the results page", exc_info=True)
     if found is None:
         _open(results_url)
-        return f"Ho aperto i risultati di YouTube per «{query}»: scegli tu il video."
+        return tr("Ho aperto i risultati di YouTube per «{query}»: scegli tu il video.").format(query=query)
     video_id, title = found
     _open(f"https://www.youtube.com/watch?v={video_id}")
-    return f"Riproduco su YouTube: {title}." if title else f"Riproduco su YouTube il primo risultato per «{query}»."
+    return tr("Riproduco su YouTube: {title}.").format(title=title) if title else tr("Riproduco su YouTube il primo risultato per «{query}».").format(query=query)
 
 
 async def web_answer(ctx: ToolContext, args: dict) -> str:
     question = args["question"].strip()
     if not question:
-        raise ToolError("Qual è la domanda?")
+        raise ToolError(tr("Qual è la domanda?"))
     answer = await ctx.services.llm.web_answer(question, language=ctx.services.settings.language)
     if not answer:
-        raise ToolError("La ricerca non ha dato risultati utili.")
+        raise ToolError(tr("La ricerca non ha dato risultati utili."))
     return answer
 
 

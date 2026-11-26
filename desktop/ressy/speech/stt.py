@@ -13,6 +13,7 @@ from ..brain.groq import GroqError
 from ..config import Settings
 from . import local_stt
 from .textnorm import normalize
+from ..i18n import tr
 
 log = logging.getLogger("ressy.stt")
 
@@ -123,7 +124,7 @@ class SpeechToText:
             name = self.settings.local_stt_model
             if not local_stt.is_downloaded(name):
                 raise GroqError(
-                    "Il modello vocale sul PC non è ancora scaricato: scaricalo in Impostazioni › Voce.",
+                    tr("Il modello vocale sul PC non è ancora scaricato: scaricalo in Impostazioni › Voce."),
                     code="model_missing", provider="PC",
                 )
             if pcm is None:
@@ -131,8 +132,8 @@ class SpeechToText:
                     pcm = await asyncio.to_thread(local_stt.decode_any, data or b"", mime, 16000)
                 except Exception as exc:
                     raise GroqError(
-                        "Non riesco a leggere questo audio sul PC: manda una nota vocale normale "
-                        "o scegli di capire la voce online.", code="audio_format", provider="PC",
+                        tr("Non riesco a leggere questo audio sul PC: manda una nota vocale normale "
+                        "o scegli di capire la voce online."), code="audio_format", provider="PC",
                     ) from exc
                 rate = 16000
             audio = prepare_for_stt(pcm, rate)
@@ -147,7 +148,7 @@ class SpeechToText:
             except Exception as exc:
                 log.warning("local transcription failed", exc_info=True)
                 raise GroqError(
-                    "Il modello vocale sul PC non è riuscito a capire l'audio, riprova.",
+                    tr("Il modello vocale sul PC non è riuscito a capire l'audio, riprova."),
                     code="local_failed", provider="PC",
                 ) from exc
         if wav is None and pcm is not None:

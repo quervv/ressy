@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import dpapi
 from .paths import config_path, ensure_dirs
+from .i18n import tr
 
 log = logging.getLogger("ressy.config")
 
@@ -24,36 +25,64 @@ DEFAULT_STT_MODEL = "whisper-large-v3"
 OLD_STT_DEFAULT = "whisper-large-v3-turbo"
 
 EDGE_VOICES = {
-    "it-IT-IsabellaNeural": "Isabella (italiano, femminile)",
-    "it-IT-ElsaNeural": "Elsa (italiano, femminile)",
-    "it-IT-DiegoNeural": "Diego (italiano, maschile)",
-    "it-IT-GiuseppeMultilingualNeural": "Giuseppe (italiano, maschile)",
-    "en-US-AvaMultilingualNeural": "Ava (English, female)",
-    "en-US-AndrewMultilingualNeural": "Andrew (English, male)",
+    "it-IT-IsabellaNeural": tr("Isabella (italiano, femminile)"),
+    "it-IT-ElsaNeural": tr("Elsa (italiano, femminile)"),
+    "it-IT-DiegoNeural": tr("Diego (italiano, maschile)"),
+    "it-IT-GiuseppeMultilingualNeural": tr("Giuseppe (italiano, maschile)"),
+    "en-US-AvaMultilingualNeural": tr("Ava (inglese, femminile)"),
+    "en-US-AndrewMultilingualNeural": tr("Andrew (inglese, maschile)"),
 }
 
+WAKE_DEFAULTS = {
+    "it": ["ressy sveglia", "sveglia ressy", "ressy svegliati"],
+    "en": ["ressy wake up", "wake up ressy", "hey ressy"],
+}
+VOICE_DEFAULTS = {"it": "it-IT-IsabellaNeural", "en": "en-US-AvaMultilingualNeural"}
+_VOICE_TWINS = {
+    "it-IT-IsabellaNeural": "en-US-AvaMultilingualNeural",
+    "it-IT-ElsaNeural": "en-US-AvaMultilingualNeural",
+    "it-IT-DiegoNeural": "en-US-AndrewMultilingualNeural",
+    "it-IT-GiuseppeMultilingualNeural": "en-US-AndrewMultilingualNeural",
+    "en-US-AvaMultilingualNeural": "it-IT-IsabellaNeural",
+    "en-US-AndrewMultilingualNeural": "it-IT-DiegoNeural",
+}
+
+
+def voice_for(language: str, voice: str) -> str:
+    code = "en" if language == "en" else "it"
+    if (voice or "").lower().startswith(code + "-"):
+        return voice
+    return _VOICE_TWINS.get(voice, VOICE_DEFAULTS[code])
+
+
+def wake_phrases_for(language: str, phrases: list[str]) -> list[str]:
+    code = "en" if language == "en" else "it"
+    other = WAKE_DEFAULTS["it" if code == "en" else "en"]
+    own = [p for p in phrases if p not in other and p not in WAKE_DEFAULTS[code]]
+    return list(WAKE_DEFAULTS[code]) + own
+
 LLM_PROVIDERS = ("groq", "gemini", "openrouter", "claude", "local")
-PROVIDER_NAMES = {"groq": "Groq", "claude": "Claude", "gemini": "Gemini", "openrouter": "OpenRouter", "local": "Sul PC"}
+PROVIDER_NAMES = {"groq": "Groq", "claude": "Claude", "gemini": "Gemini", "openrouter": "OpenRouter", "local": tr("Sul PC")}
 CLAUDE_MODELS = {
-    "claude-opus-5-5": "Claude Opus 5.5 (il più capace)",
+    "claude-opus-5-5": tr("Claude Opus 5.5 (il più capace)"),
     "claude-sonnet-5-5": "Claude Sonnet 5.5 (veloce e capace)",
-    "claude-haiku-5-5": "Claude Haiku 5.5 (il più veloce ed economico)",
+    "claude-haiku-5-5": tr("Claude Haiku 5.5 (il più veloce ed economico)"),
 }
 DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 
 STT_ENGINES = ("local", "groq", "gemini")
 LOCAL_STT_MODELS = {
-    "tiny-q5_1": ("Leggero", 32),
-    "base-q5_1": ("Bilanciato", 60),
-    "small-q5_1": ("Preciso", 190),
+    "tiny-q5_1": (tr("Leggero"), 32),
+    "base-q5_1": (tr("Bilanciato"), 60),
+    "small-q5_1": (tr("Preciso"), 190),
 }
 DEFAULT_LOCAL_STT_MODEL = "base-q5_1"
 
 LOCAL_LLM_MODELS = {
-    "qwen2.5-0.5b": ("Leggera", 491, "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "qwen2.5-0.5b": (tr("Leggera"), 491, "qwen2.5-0.5b-instruct-q4_k_m.gguf",
                      "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"),
-    "qwen2.5-1.5b": ("Consigliata", 1117, "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "qwen2.5-1.5b": (tr("Consigliata"), 1117, "qwen2.5-1.5b-instruct-q4_k_m.gguf",
                      "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"),
 }
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5-1.5b"
@@ -133,6 +162,13 @@ class Settings:
             self.agent_secret = secrets.token_urlsafe(32)
             changed = True
         return changed
+
+    def use_language(self, code: str) -> None:
+        code = "en" if code == "en" else "it"
+        if code != self.language:
+            self.wake_phrases = wake_phrases_for(code, self.wake_phrases)
+        self.tts_voice = voice_for(code, self.tts_voice)
+        self.language = code
 
     def reset_identity(self) -> None:
         self.agent_id = ""
@@ -286,17 +322,17 @@ class Settings:
     def brain_problem(self) -> str:
         if self.llm_provider == "local":
             if not self.local_llm_ready():
-                return "Scarica il modello AI sul PC (Impostazioni › Intelligenza) o inserisci una chiave API."
+                return tr("Scarica il modello AI sul PC (Impostazioni › Intelligenza) o inserisci una chiave API.")
         elif not self.provider_key(self.llm_provider):
-            return f"Per usare Ressy inserisci la chiave API di {PROVIDER_NAMES[self.llm_provider]} (Impostazioni › Intelligenza)."
+            return tr("Per usare Ressy inserisci la chiave API di {value} (Impostazioni › Intelligenza).").format(value=PROVIDER_NAMES[self.llm_provider])
         engine = self.speech_engine
         if engine == "local":
             from .speech.local_stt import is_downloaded
 
             if not is_downloaded(self.local_stt_model):
-                return "Scarica il modello vocale sul PC (Impostazioni › Voce) o scegli di capire la voce online."
+                return tr("Scarica il modello vocale sul PC (Impostazioni › Voce) o scegli di capire la voce online.")
         elif not self.provider_key(engine):
-            return f"Per capire la voce con {PROVIDER_NAMES[engine]} serve la sua chiave API, oppure scegli il modello sul PC."
+            return tr("Per capire la voce con {value} serve la sua chiave API, oppure scegli il modello sul PC.").format(value=PROVIDER_NAMES[engine])
         return ""
 
     def llm_models(self) -> list[str]:

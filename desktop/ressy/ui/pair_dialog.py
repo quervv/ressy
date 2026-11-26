@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLa
 from . import theme
 from .keys import CodeKeys
 from .winframe import style_title_bar
+from ..i18n import tr
 
 if TYPE_CHECKING:
     from ..core.controller import Controller
@@ -30,7 +31,7 @@ class QrCode(QWidget):
         qr.add_data(data)
         qr.make(fit=True)
         self.matrix = [[bool(cell) for cell in row] for row in qr.get_matrix()]
-        self.setAccessibleName("Codice QR del link di Telegram")
+        self.setAccessibleName(tr("Codice QR del link di Telegram"))
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -63,25 +64,25 @@ class PairDialog(QDialog):
         self._discord_command = ""
         self._telegram_url = ""
         self._discord_invite = ""
-        self.setWindowTitle("Ressy · Collega Telegram o Discord")
+        self.setWindowTitle(tr("Ressy · Collega Telegram o Discord"))
         self.setMinimumWidth(620)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
 
-        title = QLabel("Collega il telefono")
+        title = QLabel(tr("Collega il telefono"))
         title.setObjectName("title")
         title.setFont(theme.font(22, 700, 112))
         intro = QLabel(
-            "Dal bot di Telegram o Discord potrai dare comandi a questo PC, anche con un messaggio vocale. "
-            "Il codice vale una volta sola."
+            tr("Dal bot di Telegram o Discord potrai dare comandi a questo PC, anche con un messaggio vocale. "
+            "Il codice vale una volta sola.")
         )
         intro.setObjectName("hint")
         intro.setWordWrap(True)
 
-        self.status = QLabel("Chiedo un codice al bot…")
+        self.status = QLabel(tr("Chiedo un codice al bot…"))
         self.status.setWordWrap(True)
         self.code_keys = CodeKeys()
-        self.copy_code = QPushButton("Copia il codice")
-        self.copy_code.clicked.connect(lambda: self._copy(self._code, self.copy_code, "Copia il codice"))
+        self.copy_code = QPushButton(tr("Copia il codice"))
+        self.copy_code.clicked.connect(lambda: self._copy(self._code, self.copy_code, tr("Copia il codice")))
         self.expiry = QLabel()
         self.expiry.setObjectName("hint")
         code_row = QHBoxLayout()
@@ -94,7 +95,7 @@ class PairDialog(QDialog):
         self.telegram_title = QLabel("<b>Telegram</b>")
         self.telegram_text = QLabel()
         self.telegram_text.setWordWrap(True)
-        self.telegram_open = QPushButton("Apri Telegram")
+        self.telegram_open = QPushButton(tr("Apri Telegram"))
         self.telegram_open.setObjectName("primary")
         self.telegram_open.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._telegram_url)))
         tg_text = QVBoxLayout()
@@ -112,11 +113,11 @@ class PairDialog(QDialog):
         self.discord_title = QLabel("<b>Discord</b>")
         self.discord_text = QLabel()
         self.discord_text.setWordWrap(True)
-        self.discord_copy = QPushButton("Copia il comando")
+        self.discord_copy = QPushButton(tr("Copia il comando"))
         self.discord_copy.clicked.connect(
-            lambda: self._copy(self._discord_command, self.discord_copy, "Copia il comando")
+            lambda: self._copy(self._discord_command, self.discord_copy, tr("Copia il comando"))
         )
-        self.discord_invite_button = QPushButton("Aggiungi il bot")
+        self.discord_invite_button = QPushButton(tr("Aggiungi il bot"))
         self.discord_invite_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._discord_invite)))
         dc_buttons = QHBoxLayout()
         dc_buttons.addWidget(self.discord_copy)
@@ -129,9 +130,9 @@ class PairDialog(QDialog):
         dc.addWidget(self.discord_text)
         dc.addLayout(dc_buttons)
 
-        self.retry = QPushButton("Nuovo codice")
+        self.retry = QPushButton(tr("Nuovo codice"))
         self.retry.clicked.connect(self.request)
-        close = QPushButton("Chiudi")
+        close = QPushButton(tr("Chiudi"))
         close.clicked.connect(self.reject)
         bottom = QHBoxLayout()
         bottom.addWidget(self.retry)
@@ -181,9 +182,9 @@ class PairDialog(QDialog):
         self.status.setObjectName("")
         self._restyle(self.status)
         if not self.controller.settings.remote_ready:
-            self._on_error("Il controllo da remoto non è configurato: in Impostazioni › Da remoto scegli il tuo bot e incolla il token.")
+            self._on_error(tr("Il controllo da remoto non è configurato: in Impostazioni › Da remoto scegli il tuo bot e incolla il token."))
             return
-        self.status.setText("Chiedo un codice al bot…")
+        self.status.setText(tr("Chiedo un codice al bot…"))
         self.retry.setEnabled(False)
         self.controller.request_pair_code()
 
@@ -193,7 +194,7 @@ class PairDialog(QDialog):
         self._code = str(data.get("code") or "")
         self._expires_at = time.monotonic() + float(data.get("expires_in") or 600)
         platforms = data.get("platforms") or {}
-        self.status.setText("Usa questo codice dal telefono:")
+        self.status.setText(tr("Usa questo codice dal telefono:"))
         self.code_keys.set_code(self._code)
 
         telegram = platforms.get("telegram")
@@ -201,8 +202,7 @@ class PairDialog(QDialog):
         if telegram:
             self._telegram_url = str(telegram.get("url") or "")
             self.telegram_text.setText(
-                "Inquadra il QR con il telefono, oppure apri il link: il bot ti collega da solo.<br>"
-                f"<span style='color:{theme.LEGEND_DIM}'>{telegram.get('instruction', '')}</span>"
+                tr("Inquadra il QR con il telefono, oppure apri il link: il bot ti collega da solo.<br><span style='color:{LEGEND_DIM}'>{get}</span>").format(LEGEND_DIM=theme.LEGEND_DIM, get=telegram.get('instruction', ''))
             )
             self.telegram_open.setVisible(bool(self._telegram_url))
             if self._telegram_url:
@@ -212,12 +212,12 @@ class PairDialog(QDialog):
         discord = platforms.get("discord")
         self.discord_box.setVisible(bool(discord))
         if discord:
-            self._discord_command = f"!collega {self._code}"
+            self._discord_command = tr("!collega {code}").format(code=self._code)
             self._discord_invite = str(discord.get("url") or "")
             self.discord_text.setText(str(discord.get("instruction") or ""))
             self.discord_invite_button.setVisible(bool(self._discord_invite))
         if not telegram and not discord:
-            self.status.setText("Il server non ha bot attivi: chiedi a chi lo gestisce di configurarli.")
+            self.status.setText(tr("Il server non ha bot attivi: chiedi a chi lo gestisce di configurarli."))
         self._show_code(True)
         self.retry.setEnabled(True)
         self._countdown()
@@ -228,7 +228,7 @@ class PairDialog(QDialog):
             return
         self._tick.stop()
         self._show_code(False)
-        self.status.setText(text or "Il server non ha risposto.")
+        self.status.setText(text or tr("Il server non ha risposto."))
         self.status.setObjectName("error")
         self._restyle(self.status)
         self.retry.setEnabled(True)
@@ -241,7 +241,7 @@ class PairDialog(QDialog):
         self._show_code(False)
         self.status.setObjectName("ok")
         self._restyle(self.status)
-        self.status.setText(f"Collegato: {link.get('display', '')} su {platform}. Ora puoi scrivere al bot.")
+        self.status.setText(tr("Collegato: {get} su {platform}. Ora puoi scrivere al bot.").format(get=link.get('display', ''), platform=platform))
         self._close_timer.start(2600)
 
     def _countdown(self) -> None:
@@ -249,9 +249,9 @@ class PairDialog(QDialog):
         if left <= 0:
             self._tick.stop()
             self._show_code(False)
-            self.status.setText("Il codice è scaduto: chiedine uno nuovo.")
+            self.status.setText(tr("Il codice è scaduto: chiedine uno nuovo."))
             return
-        self.expiry.setText(f"Scade tra {left // 60}:{left % 60:02d}")
+        self.expiry.setText(tr("Scade tra {value}:{value2:02d}").format(value=left // 60, value2=left % 60))
 
     def _show_code(self, visible: bool) -> None:
         for widget in (self.code_keys, self.copy_code, self.expiry):
@@ -269,7 +269,7 @@ class PairDialog(QDialog):
         if not text:
             return
         QGuiApplication.clipboard().setText(text)
-        button.setText("Copiato")
+        button.setText(tr("Copiato"))
         QTimer.singleShot(1500, lambda: button.setText(label))
 
     def done(self, result: int) -> None:

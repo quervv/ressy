@@ -12,6 +12,7 @@ from . import screen, winapi
 from .apps import launch
 from ..paths import app_dir
 from .registry import Tool, ToolContext, ToolError, params
+from ..i18n import tr
 
 MAX_CONTACTS = 30
 
@@ -96,7 +97,7 @@ def _launch_discord(ctx: ToolContext) -> None:
         if entry is not None and "discord" in entry.norm:
             launch(entry)
             return
-    raise ToolError("Discord non sembra installato su questo PC.")
+    raise ToolError(tr("Discord non sembra installato su questo PC."))
 
 
 def _wait_main_window(timeout: float) -> winapi.Window | None:
@@ -276,7 +277,7 @@ def _open_chat(window: winapi.Window, recipient: str, kind: str) -> str:
         winapi.type_text(query)
         time.sleep(1.2)
         if winapi.foreground_window() != hwnd:
-            raise ToolError("Discord ha perso il focus mentre cercavo la chat: messaggio NON inviato.")
+            raise ToolError(tr("Discord ha perso il focus mentre cercavo la chat: messaggio NON inviato."))
 
         if use_ocr:
             lines = _read(_overlay_region(hwnd))
@@ -297,12 +298,10 @@ def _open_chat(window: winapi.Window, recipient: str, kind: str) -> str:
         log.info("discord: chat opened but not confirmed")
         winapi.tap(winapi.VK["esc"])
         time.sleep(0.3)
-    hint = (f" Nella ricerca di Discord ci sono: {', '.join(offered)}. Chiedi all'utente se intendeva uno di "
-            "questi e, se sì, riprova con quel nome esatto.") if offered else \
-        " Chiedi all'utente di ripetere o scrivere il nome come appare su Discord."
+    hint = (tr(" Nella ricerca di Discord ci sono: {join}. Chiedi all'utente se intendeva uno di questi e, se sì, riprova con quel nome esatto.").format(join=', '.join(offered))) if offered else \
+        tr(" Chiedi all'utente di ripetere o scrivere il nome come appare su Discord.")
     raise _Stuck(
-        f"Non ho trovato la chat con '{recipient}' su Discord (o non sono riuscita a verificarla): "
-        f"il messaggio NON è stato inviato.{hint}"
+        tr("Non ho trovato la chat con '{recipient}' su Discord (o non sono riuscita a verificarla): il messaggio NON è stato inviato.{hint}").format(recipient=recipient, hint=hint)
     )
 
 
@@ -313,28 +312,28 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
     if kind != "current" and (not recipient or means_current_chat(recipient)):
         kind = "current" if recipient else kind
     if kind != "current" and not recipient:
-        raise ToolError("A chi devo scrivere?")
+        raise ToolError(tr("A chi devo scrivere?"))
     if kind == "user":
         recipient = known_name(recipient)
     if not message:
-        raise ToolError("Il messaggio è vuoto.")
+        raise ToolError(tr("Il messaggio è vuoto."))
     if len(message) > MAX_LENGTH:
-        raise ToolError(f"Il messaggio è troppo lungo per Discord ({len(message)} caratteri, massimo {MAX_LENGTH}).")
+        raise ToolError(tr("Il messaggio è troppo lungo per Discord ({len} caratteri, massimo {MAX_LENGTH}).").format(len=len(message), MAX_LENGTH=MAX_LENGTH))
     if not winapi.input_desktop_available():
-        raise ToolError("Il PC è bloccato: non posso scrivere su Discord finché non viene sbloccato.")
+        raise ToolError(tr("Il PC è bloccato: non posso scrivere su Discord finché non viene sbloccato."))
 
     window = _main_window()
     if window is None:
         _launch_discord(ctx)
         window = _wait_main_window(40)
         if window is None:
-            raise ToolError("Discord non si è aperto in tempo. Riprova tra poco.")
+            raise ToolError(tr("Discord non si è aperto in tempo. Riprova tra poco."))
         time.sleep(4.0)
         window = _main_window() or window
 
     winapi.wait_modifiers_released()
     if not winapi.focus_window(window.hwnd):
-        raise ToolError("Non riesco a portare Discord in primo piano.")
+        raise ToolError(tr("Non riesco a portare Discord in primo piano."))
     time.sleep(0.35)
 
     if kind == "current":
@@ -344,19 +343,19 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
         _open_chat(window, recipient, kind)
 
     if winapi.foreground_window() != window.hwnd:
-        raise ToolError("Discord ha perso il focus: messaggio NON inviato.")
+        raise ToolError(tr("Discord ha perso il focus: messaggio NON inviato."))
     winapi.type_text(message + " ", newline="shift_enter")
     time.sleep(0.35)
     if winapi.foreground_window() != window.hwnd:
-        raise ToolError("Discord ha perso il focus mentre scrivevo: controlla la chat, il messaggio potrebbe non essere partito.")
+        raise ToolError(tr("Discord ha perso il focus mentre scrivevo: controlla la chat, il messaggio potrebbe non essere partito."))
     winapi.tap(winapi.VK["enter"])
     time.sleep(0.4)
     target = _chat_name(winapi.window_title(window.hwnd))
     if not target or target.lower() == "discord":
-        target = recipient or "la chat aperta"
+        target = recipient or tr("la chat aperta")
     if kind == "user":
         remember_contact(_clean_name(target.split(" | ")[0]) if target.startswith("@") else recipient)
-    return f"Messaggio inviato su Discord a {target}."
+    return tr("Messaggio inviato su Discord a {target}.").format(target=target)
 
 
 TOOLS = [
@@ -378,6 +377,7 @@ TOOLS = [
         send_discord_message,
         timeout=90,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
 ]
 

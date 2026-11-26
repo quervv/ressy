@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QImage, QMouseE
 from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from . import logo, theme
+from ..i18n import tr
 
 if TYPE_CHECKING:
     from ..core.controller import Controller
@@ -187,8 +188,8 @@ class EscKey(QAbstractButton):
         super().__init__(parent)
         self.setFixedSize(QSize(44, 34))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Metti Ressy a dormire")
-        self.setAccessibleName("Metti Ressy a dormire")
+        self.setToolTip(tr("Metti Ressy a dormire"))
+        self.setAccessibleName(tr("Metti Ressy a dormire"))
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._hover = False
 
@@ -222,7 +223,7 @@ def _legend(text: str, color: str) -> QLabel:
     f = theme.font(11, 700, 108)
     f.setLetterSpacing(f.SpacingType.PercentageSpacing, 104)
     label.setFont(f)
-    label.setStyleSheet(f"color: {color}; background: transparent;")
+    label.setStyleSheet("color: {color}; background: transparent;".format(color=color))
     label.setFixedWidth(LEGEND_COLUMN)
     label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     return label
@@ -258,7 +259,7 @@ class Hud(QWidget):
         self.esc = EscKey()
         self.esc.clicked.connect(self.controller.sleep)
 
-        self.state_legend = _legend("Dorme", theme.LEGEND)
+        self.state_legend = _legend(tr("Dorme"), theme.LEGEND)
         self.presence_legend = _legend(theme.OFFLINE_LABEL, theme.LEGEND_DIM)
         self.ressy_label = QLabel()
         self.ressy_label.setWordWrap(True)
@@ -267,13 +268,13 @@ class Hud(QWidget):
         self.ressy_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.ressy_label.setMaximumHeight(QFontMetrics(self.ressy_label.font()).lineSpacing() * 3 + 2)
 
-        self.user_legend = _legend("Tu", theme.ACCENT)
+        self.user_legend = _legend(tr("Tu"), theme.ACCENT)
         self.user_lines = VoiceLines(theme.ACCENT, 30)
         self.user_label = QLabel()
         self.user_label.setWordWrap(True)
         self.user_label.setFont(theme.font(14, 400, 100))
         self.user_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.user_label.setStyleSheet(f"color: {theme.LEGEND}; background: transparent;")
+        self.user_label.setStyleSheet("color: {LEGEND}; background: transparent;".format(LEGEND=theme.LEGEND))
         self.user_label.setMaximumHeight(QFontMetrics(self.user_label.font()).lineSpacing() * 2 + 2)
 
         for w in (self.ressy_label, self.user_label, self.state_legend, self.presence_legend, self.user_legend):
@@ -297,7 +298,7 @@ class Hud(QWidget):
 
         self.separator = QWidget()
         self.separator.setFixedHeight(1)
-        self.separator.setStyleSheet(f"background: {theme.PLATE_EDGE};")
+        self.separator.setStyleSheet("background: {PLATE_EDGE};".format(PLATE_EDGE=theme.PLATE_EDGE))
 
         you = QHBoxLayout()
         you.setSpacing(0)
@@ -363,7 +364,7 @@ class Hud(QWidget):
         self._render_texts()
 
     def on_user_line(self, text: str, final: bool) -> None:
-        if final and text and text != "Non ho sentito niente.":
+        if final and text and text != tr("Non ho sentito niente."):
             shown = f"«{clip_text(text, 160)}»"
         else:
             shown = clip_text(text, 160)
@@ -374,7 +375,7 @@ class Hud(QWidget):
         self._apply_presence()
 
     def _apply_state(self) -> None:
-        label = theme.STATE_LABELS.get(self._state, "Ascolta")
+        label = theme.STATE_LABELS.get(self._state, tr("Ascolta"))
         self.state_legend.setText(label.upper())
         self.mark.set_state(pressed=self._state == "hearing", mood=self._state)
 
@@ -384,14 +385,14 @@ class Hud(QWidget):
         self.mark.set_state(backlight=online)
         self.presence_legend.setVisible(enabled and not online)
         tip = {
-            "online": "Telegram/Discord: online, puoi comandare il PC dal telefono",
-            "connecting": "Telegram/Discord: mi sto collegando al server…",
-            "disabled": "Comandi da Telegram/Discord disattivati",
-            "auth_failed": "Telegram/Discord: il server ha rifiutato questo PC",
-            "outdated": "Telegram/Discord: aggiorna Ressy per collegarti",
-            "replaced": "Telegram/Discord: Ressy è attiva su un altro PC con la stessa identità",
-            "bot_error": "Telegram/Discord: il tuo bot non è partito, controlla il token",
-        }.get(self._remote_state, "Telegram/Discord: offline")
+            "online": tr("Telegram/Discord: online, puoi comandare il PC dal telefono"),
+            "connecting": tr("Telegram/Discord: mi sto collegando al server…"),
+            "disabled": tr("Comandi da Telegram/Discord disattivati"),
+            "auth_failed": tr("Telegram/Discord: il server ha rifiutato questo PC"),
+            "outdated": tr("Telegram/Discord: aggiorna Ressy per collegarti"),
+            "replaced": tr("Telegram/Discord: Ressy è attiva su un altro PC con la stessa identità"),
+            "bot_error": tr("Telegram/Discord: il tuo bot non è partito, controlla il token"),
+        }.get(self._remote_state, tr("Telegram/Discord: offline"))
         self.mark.setToolTip(tip)
 
     def _render_texts(self) -> None:
@@ -404,7 +405,7 @@ class Hud(QWidget):
         else:
             text, color = self._status_text, theme.LEGEND_DIM
         self.ressy_label.setText(clip_text(text, 230))
-        self.ressy_label.setStyleSheet(f"color: {color}; background: transparent;")
+        self.ressy_label.setStyleSheet("color: {color}; background: transparent;".format(color=color))
 
     def _tick(self) -> None:
         _, ressy = self.controller.player.meter.read()

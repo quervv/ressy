@@ -14,16 +14,17 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
+from ..i18n import tr
 
 MODES = (
-    ("off", "Nessuno", "Ressy risponde solo alla tua voce, su questo PC."),
-    ("local", "Il tuo bot, su questo PC",
-     "Crei un bot tuo su Telegram (o Discord) e Ressy lo fa girare qui. Niente da ospitare. "
+    ("off", tr("Nessuno"), tr("Ressy risponde solo alla tua voce, su questo PC.")),
+    ("local", tr("Il tuo bot, su questo PC"),
+     tr("Crei un bot tuo su Telegram (o Discord) e Ressy lo fa girare qui. Niente da ospitare. "
      "Quando il PC è spento il bot tace; quando si riaccende ti scrive che è di nuovo online "
-     "e non esegue i messaggi arrivati nel frattempo."),
-    ("server", "Il tuo server (self-host)",
-     "Il bot gira su una macchina tua sempre accesa (un altro PC, un Raspberry, un VPS) e ti avvisa "
-     "subito quando questo PC va offline. Puoi installare il server con questo stesso installer."),
+     "e non esegue i messaggi arrivati nel frattempo.")),
+    ("server", tr("Il tuo server (self-host)"),
+     tr("Il bot gira su una macchina tua sempre accesa (un altro PC, un Raspberry, un VPS) e ti avvisa "
+     "subito quando questo PC va offline. Puoi installare il server con questo stesso installer.")),
 )
 
 
@@ -48,12 +49,13 @@ def secret_field(placeholder: str) -> QLineEdit:
     return field
 
 
-TOKEN_HELP = (
-    "Telegram: scrivi " + link("@BotFather", "https://t.me/BotFather")
-    + " <code>/newbot</code>, scegli un nome e copia il token. "
-    "Discord (facoltativo): " + link("Developer Portal", "https://discord.com/developers/applications")
-    + " → New Application → Bot → Reset Token. "
+TOKEN_HELP = tr(
+    "Telegram: scrivi {botfather} <code>/newbot</code>, scegli un nome e copia il token. "
+    "Discord (facoltativo): {portal} → New Application → Bot → Reset Token. "
     "I token restano su questo PC, cifrati da Windows."
+).format(
+    botfather=link("@BotFather", "https://t.me/BotFather"),
+    portal=link("Developer Portal", "https://discord.com/developers/applications"),
 )
 
 
@@ -65,10 +67,10 @@ class TokenFields(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(18)
         form.setVerticalSpacing(10)
-        self.telegram = secret_field("123456789:AA…")
+        self.telegram = secret_field(tr("123456789:AA…"))
         self.discord = secret_field("facoltativo")
-        form.addRow("Token Telegram", self.telegram)
-        form.addRow("Token Discord", self.discord)
+        form.addRow(tr("Token Telegram"), self.telegram)
+        form.addRow(tr("Token Discord"), self.discord)
 
     def values(self) -> dict[str, str]:
         return {"telegram_token": self.telegram.text().strip(), "discord_token": self.discord.text().strip()}
@@ -83,22 +85,22 @@ def check_token(platform: str, token: str) -> str:
     if not token:
         return ""
     if any(ch.isspace() for ch in token):
-        return "Il token non deve contenere spazi."
+        return tr("Il token non deve contenere spazi.")
     if platform == "telegram":
         head, _, tail = token.partition(":")
         if not head.isdigit() or len(tail) < 30:
-            return "Il token Telegram ha la forma 123456789:AA… (lo trovi nel messaggio di BotFather)."
+            return tr("Il token Telegram ha la forma 123456789:AA… (lo trovi nel messaggio di BotFather).")
     elif len(token) < 50 or token.count(".") < 2:
-        return "Il token Discord è lungo e ha due punti: copialo da Bot → Reset Token."
+        return tr("Il token Discord è lungo e ha due punti: copialo da Bot → Reset Token.")
     return ""
 
 
 def check_server_url(url: str) -> str:
     url = url.strip()
     if not url:
-        return "Scrivi l'indirizzo del tuo server, per esempio ws://192.168.1.10:8765/ws/agent."
+        return tr("Scrivi l'indirizzo del tuo server, per esempio ws://192.168.1.10:8765/ws/agent.")
     if not url.startswith(("ws://", "wss://")):
-        return "L'indirizzo del server inizia con ws:// (rete di casa) o wss:// (Internet, con HTTPS)."
+        return tr("L'indirizzo del server inizia con ws:// (rete di casa) o wss:// (Internet, con HTTPS).")
     return ""
 
 
@@ -129,7 +131,7 @@ class BotSetup(QWidget):
         server.setHorizontalSpacing(18)
         self.server_url = QLineEdit()
         self.server_url.setPlaceholderText("ws://192.168.1.10:8765/ws/agent")
-        server.addRow("Indirizzo del server", self.server_url)
+        server.addRow(tr("Indirizzo del server"), self.server_url)
         boxes = {"local": self.local_box, "server": self.server_box}
         for key, title, text in MODES:
             radio = QRadioButton(title)
@@ -169,7 +171,7 @@ class BotSetup(QWidget):
         if mode == "local":
             values = self.tokens.values()
             if not values["telegram_token"] and not values["discord_token"]:
-                return "Incolla il token del tuo bot Telegram (o Discord)."
+                return tr("Incolla il token del tuo bot Telegram (o Discord).")
             return check_token("telegram", values["telegram_token"]) or check_token("discord", values["discord_token"])
         if mode == "server":
             return check_server_url(self.server_url.text())

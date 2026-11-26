@@ -35,6 +35,7 @@ from ..tools.reminders import Reminder, ReminderService
 from .hotkey import HoldHotkey
 from .runner import AsyncRunner
 from .services import Services
+from ..i18n import tr
 
 log = logging.getLogger("ressy.controller")
 
@@ -51,7 +52,7 @@ PREROLL_FRAMES = 50
 PREROLL_LEAD_S = 0.15
 WARM_MIC_S = 2.5
 REMOTE_TIMEOUT_S = 140.0
-VOICE_TIMEOUT_S = 120.0
+VOICE_TIMEOUT_S = 300.0
 MAX_REPLY_TEXT = 8000
 MAX_IMAGE_BYTES = 9 * 1024 * 1024
 MAX_VOICE_BYTES = 20 * 1024 * 1024
@@ -59,39 +60,41 @@ MAX_VOICE_BYTES = 20 * 1024 * 1024
 POPULAR_APPS = (
     "spotify", "discord", "google chrome", "steam", "telegram", "whatsapp", "word", "excel", "powerpoint",
     "visual studio code", "obs studio", "epic games launcher", "minecraft launcher", "fortnite", "roblox player",
-    "microsoft edge", "firefox", "teams", "zoom", "notion", "blocco note", "calcolatrice", "battle net",
-    "riot client", "valorant", "league of legends", "netflix", "prime video", "capcut", "photoshop",
+    "microsoft edge", "firefox", "teams", "zoom", "notion", "blocco note", "notepad", "calcolatrice", "calculator",
+    "battle net", "riot client", "valorant", "league of legends", "netflix", "prime video", "capcut", "photoshop",
 )
 
 TOOL_STATUS = {
-    "open_app": "Apro il programma…",
-    "close_app": "Chiudo il programma…",
-    "list_windows": "Guardo le finestre aperte…",
-    "focus_app": "Cambio finestra…",
-    "send_discord_message": "Scrivo su Discord…",
-    "open_url": "Apro il browser…",
-    "web_search": "Cerco su Google…",
-    "play_youtube": "Cerco su YouTube…",
-    "web_answer": "Cerco sul web…",
-    "media_control": "Controllo la musica…",
-    "set_volume": "Regolo il volume…",
-    "take_screenshot": "Faccio uno screenshot…",
-    "pc_power": "Gestisco l’alimentazione…",
-    "system_status": "Controllo il PC…",
-    "open_folder": "Apro la cartella…",
-    "type_text": "Scrivo…",
-    "press_keys": "Premo i tasti…",
-    "set_clipboard": "Copio negli appunti…",
-    "reminder": "Gestisco i promemoria…",
-    "create_file": "Creo il file…",
-    "create_folder": "Creo la cartella…",
-    "read_file": "Leggo il file…",
-    "list_folder": "Guardo nella cartella…",
-    "write_in_app": "Scrivo nell’app…",
-    "read_screen": "Guardo lo schermo…",
-    "click_text": "Clicco…",
-    "weather": "Guardo il meteo…",
-    "run_powershell": "Eseguo un comando…",
+    "open_app": tr("Apro il programma…"),
+    "close_app": tr("Chiudo il programma…"),
+    "list_windows": tr("Guardo le finestre aperte…"),
+    "focus_app": tr("Cambio finestra…"),
+    "send_discord_message": tr("Scrivo su Discord…"),
+    "open_url": tr("Apro il browser…"),
+    "web_search": tr("Cerco su Google…"),
+    "play_youtube": tr("Cerco su YouTube…"),
+    "web_answer": tr("Cerco sul web…"),
+    "media_control": tr("Controllo la musica…"),
+    "set_volume": tr("Regolo il volume…"),
+    "take_screenshot": tr("Faccio uno screenshot…"),
+    "pc_power": tr("Gestisco l’alimentazione…"),
+    "system_status": tr("Controllo il PC…"),
+    "open_folder": tr("Apro la cartella…"),
+    "type_text": tr("Scrivo…"),
+    "press_keys": tr("Premo i tasti…"),
+    "set_clipboard": tr("Copio negli appunti…"),
+    "reminder": tr("Gestisco i promemoria…"),
+    "create_file": tr("Creo il file…"),
+    "create_folder": tr("Creo la cartella…"),
+    "file_action": tr("Sistemo i file…"),
+    "wait": tr("Aspetto…"),
+    "read_file": tr("Leggo il file…"),
+    "list_folder": tr("Guardo nella cartella…"),
+    "write_in_app": tr("Scrivo nell’app…"),
+    "read_screen": tr("Guardo lo schermo…"),
+    "click_text": tr("Clicco…"),
+    "weather": tr("Guardo il meteo…"),
+    "run_powershell": tr("Eseguo un comando…"),
 }
 
 
@@ -146,16 +149,16 @@ def error_text(exc: BaseException) -> str:
     if isinstance(exc, GroqError) and name == "PC":
         return str(exc)
     if isinstance(exc, GroqAuthError):
-        return f"La chiave API di {name} manca o non è valida: controllala nelle impostazioni di Ressy."
+        return tr("La chiave API di {name} manca o non è valida: controllala nelle impostazioni di Ressy.").format(name=name)
     if isinstance(exc, GroqRateLimited):
         return str(exc)
     if isinstance(exc, GroqUnavailable):
-        return f"Non riesco a raggiungere {name}: controlla la connessione a internet."
+        return tr("Non riesco a raggiungere {name}: controlla la connessione a internet.").format(name=name)
     if isinstance(exc, asyncio.TimeoutError):
-        return "Ci sto mettendo troppo: riprova tra poco."
+        return tr("Ci sto mettendo troppo: riprova tra poco.")
     if isinstance(exc, GroqError):
-        return f"{name} ha restituito un errore, riprova tra poco."
-    return "Si è verificato un errore imprevisto."
+        return tr("{name} ha restituito un errore, riprova tra poco.").format(name=name)
+    return tr("Si è verificato un errore imprevisto.")
 
 
 def _b64(data: bytes) -> str:
@@ -170,7 +173,7 @@ class Controller:
 
         self.mic = Microphone(lambda: self.settings.mic_device)
         self.mic.on_switch = lambda name: self.ui.toast(
-            "Microfono", f"Il microfono predefinito di Windows non manda suono: uso «{name}».")
+            tr("Microfono"), tr("Il microfono predefinito di Windows non manda suono: uso «{name}».").format(name=name))
         self.player = AudioPlayer(lambda: self.settings.output_device)
         self.cue_player = AudioPlayer(lambda: self.settings.output_device)
         self.llm = LLMRouter(settings)
@@ -231,7 +234,7 @@ class Controller:
             self.hotkey.start()
         except Exception:
             log.exception("keyboard hook unavailable")
-            self.ui.toast("Ressy", "Non riesco a intercettare la tastiera: il tasto per parlare non funzionerà.")
+            self.ui.toast("Ressy", tr("Non riesco a intercettare la tastiera: il tasto per parlare non funzionerà."))
         self._started = True
 
     async def _start_async(self) -> None:
@@ -311,7 +314,7 @@ class Controller:
             try:
                 self.ui.pair_code(await self.remote.request_pair_code())
             except Exception as exc:
-                self.ui.pair_error(str(exc) or "Il server non ha risposto.")
+                self.ui.pair_error(str(exc) or tr("Il server non ha risposto."))
 
         self.runner.submit(go())
 
@@ -320,7 +323,7 @@ class Controller:
             try:
                 await self.remote.unlink(platform, user_id)
             except Exception as exc:
-                self.ui.toast("Ressy", f"Non riesco a scollegare: {exc}")
+                self.ui.toast("Ressy", tr("Non riesco a scollegare: {exc}").format(exc=exc))
 
         self.runner.submit(go())
 
@@ -398,7 +401,7 @@ class Controller:
                 return
             except Exception as exc:
                 log.exception("bot failed to start")
-                self.remote.block(f"Il bot non è partito ({type(exc).__name__}).")
+                self.remote.block(tr("Il bot non è partito ({name}).").format(name=type(exc).__name__))
                 return
         else:
             await self.bot.stop()
@@ -424,7 +427,7 @@ class Controller:
             try:
                 self._ensure_mic()
             except MicError as exc:
-                self.ui.toast("Microfono", str(exc))
+                self.ui.toast(tr("Microfono"), str(exc))
         if self.awake and self._mode != "ptt" and self.state == LISTENING:
             self._set_mode(self._idle_mode())
 
@@ -493,7 +496,7 @@ class Controller:
             self._ensure_mic()
         except MicError as exc:
             self._play_cue("error")
-            self.ui.toast("Microfono non disponibile", str(exc))
+            self.ui.toast(tr("Microfono non disponibile"), str(exc))
             return
         self.ptt.begin(self._take_preroll())
         self._set_mode("ptt")
@@ -600,17 +603,17 @@ class Controller:
                          len(match.remainder.split()))
                 await self._wake_up(first_command=match.remainder)
             elif not text:
-                self.ui.toast("Ressy", "Non ho capito bene: tieni premuto K e riprova «Ressy, sveglia!».")
+                self.ui.toast("Ressy", tr("Non ho capito bene: tieni premuto K e riprova «Ressy, sveglia!»."))
                 log.info("wake attempt: nothing understood (%s)", transcript.rejected)
             else:
-                self.ui.toast("Ressy", f"Per svegliarmi di' «{self.settings.wake_phrases[0].capitalize()}!»")
+                self.ui.toast("Ressy", tr("Per svegliarmi di' «{capitalize}!»").format(capitalize=self.settings.wake_phrases[0].capitalize()))
                 log.info("hotkey speech without the wake phrase: ignored")
             return
         if not self.awake:
             return
         if not text:
             if job.push_to_talk:
-                self.ui.user_line("Non ho sentito niente.", True)
+                self.ui.user_line(tr("Non ho sentito niente."), True)
             else:
                 self.ui.user_line("", False)
             return
@@ -623,9 +626,18 @@ class Controller:
     async def _converse(self, text: str, gen: int) -> None:
         self._set_state(THINKING)
         self.ui.status("")
+        progress = {"step": ""}
+
+        def on_step(index: int, total: int, _text: str) -> None:
+            progress["step"] = f"{index}/{total} · "
+            self.ui.status(progress["step"] + "…")
+
+        def on_tool(name: str) -> None:
+            self.ui.status(progress["step"] + TOOL_STATUS.get(name, "…"))
+
         try:
             result = await asyncio.wait_for(
-                self.brain.respond(text, VOICE, on_tool=lambda name: self.ui.status(TOOL_STATUS.get(name, "…"))),
+                self.brain.respond(text, VOICE, on_tool=on_tool, on_step=on_step),
                 timeout=VOICE_TIMEOUT_S,
             )
         except Exception as exc:
@@ -662,9 +674,9 @@ class Controller:
         try:
             self._ensure_mic()
         except MicError as exc:
-            self.ui.toast("Microfono non disponibile", str(exc))
+            self.ui.toast(tr("Microfono non disponibile"), str(exc))
         if not self.settings.brain_ready:
-            await self._say("Ciao! Per iniziare mi serve una chiave API: inseriscila nelle impostazioni.")
+            await self._say(tr("Ciao! Per iniziare mi serve una chiave API: inseriscila nelle impostazioni."))
             self.ui.open_settings(self.settings.brain_problem)
             return
         if first_command:
@@ -720,7 +732,7 @@ class Controller:
 
     async def _remote_turn(self, message: dict[str, Any], channel: Channel) -> dict[str, Any]:
         if not self.settings.brain_ready:
-            return {"ok": False, "text": "Sul PC manca una chiave API: " + self.settings.brain_problem}
+            return {"ok": False, "text": tr("Sul PC manca una chiave API: ") + self.settings.brain_problem}
         text = str(message.get("text") or "").strip()
         transcript: str | None = None
         audio = message.get("audio")
@@ -728,20 +740,20 @@ class Controller:
             try:
                 data = base64.b64decode(str(audio.get("data") or ""), validate=True)
             except (binascii.Error, ValueError):
-                return {"ok": False, "text": "Il messaggio vocale è arrivato danneggiato."}
+                return {"ok": False, "text": tr("Il messaggio vocale è arrivato danneggiato.")}
             heard = await self.stt.transcribe_file(data, str(audio.get("mime") or "audio/ogg"))
             if not heard.ok:
-                return {"ok": False, "text": "Non sono riuscita a capire il messaggio vocale."}
+                return {"ok": False, "text": tr("Non sono riuscita a capire il messaggio vocale.")}
             text = transcript = heard.text
         if not text:
-            return {"ok": False, "text": "Il messaggio è vuoto."}
+            return {"ok": False, "text": tr("Il messaggio è vuoto.")}
 
         if self.settings.notify_remote_commands:
             who = f" ({channel.display})" if channel.display else ""
-            self.ui.toast(f"Comando da {channel.label}{who}", text[:160])
+            self.ui.toast(tr("Comando da {label}{who}").format(label=channel.label, who=who), text[:160])
             self._play_cue("remote")
         if self.awake:
-            self.ui.status(f"Comando da {channel.label}…")
+            self.ui.status(tr("Comando da {label}…").format(label=channel.label))
 
         result = await self.brain.respond(text, channel)
         reply: dict[str, Any] = {"ok": True, "text": result.text[:MAX_REPLY_TEXT]}
@@ -767,15 +779,15 @@ class Controller:
         elif kind == "linked":
             self.ui.linked(data)
             platform = {"telegram": "Telegram", "discord": "Discord"}.get(str(data.get("platform")), "chat")
-            self.ui.toast("Ressy collegata", f"Ora puoi comandare questo PC da {platform} ({data.get('display', '')}).")
+            self.ui.toast(tr("Ressy collegata"), tr("Ora puoi comandare questo PC da {platform} ({get}).").format(platform=platform, get=data.get('display', '')))
         elif kind == "pair_code":
             self.ui.pair_code(data)
 
     async def _announce_reminder(self, reminder: Reminder, late: bool) -> None:
-        text = f"Promemoria: {reminder.text}"
+        text = tr("Promemoria: {text}").format(text=reminder.text)
         if late:
-            text += " (in ritardo: il PC era spento o in sospensione)"
-        self.ui.toast("Promemoria", reminder.text)
+            text += tr(" (in ritardo: il PC era spento o in sospensione)")
+        self.ui.toast(tr("Promemoria"), reminder.text)
         if reminder.platform:
             delivered = await self.remote.notify(
                 "⏰ " + text, target={"platform": reminder.platform, "user_id": reminder.user_id}

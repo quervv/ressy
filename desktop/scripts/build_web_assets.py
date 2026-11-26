@@ -52,7 +52,48 @@ def _key(p: QPainter, rect: QRectF, u: float, top: str, skirt: str, legend: str,
         p.drawText(QPointF(face.x() + u * 0.1, face.y() + u * 0.075 + ascent * 0.8), text)
 
 
-def og_image(path: Path) -> None:
+OG = {
+    "it": ("Tieni premuto", "e di’ «Ressy, sveglia!»", [
+        [("Tab", 1.5, "mod")] + [(c, 1, "a") for c in "QWERTYUIOP"] + [("é", 1, "a"), ("*", 1, "a"), ("", 1.5, "a")],
+        [("Bloc Maiusc", 1.75, "mod")] + [(c, 1, "a") for c in "ASDFGHJ"] + [("K", 1, "k")] + [(c, 1, "a") for c in "Lòàù"],
+        [("Maiusc", 1.25, "mod")] + [(c, 1, "a") for c in "<ZXCVBNM,.-"] + [("", 2.75, "mod")],
+    ]),
+    "en": ("Hold", "and say “Ressy, wake up!”", [
+        [("Tab", 1.5, "mod")] + [(c, 1, "a") for c in "QWERTYUIOP[]"] + [("", 1.5, "a")],
+        [("Caps Lock", 1.75, "mod")] + [(c, 1, "a") for c in "ASDFGHJ"] + [("K", 1, "k")] + [(c, 1, "a") for c in "L;'#"],
+        [("Shift", 1.25, "mod")] + [(c, 1, "a") for c in "\\ZXCVBNM,./"] + [("", 2.75, "mod")],
+    ]),
+}
+
+
+def _keyboard_x0(rows: list, u: float, width: float) -> float:
+    home_row = next(row for row in rows if any(kind == "k" for _, _, kind in row))
+    target = width - sum(wu for _, wu, _ in home_row) * u
+    fonts = {"mod": QFontMetricsF(theme.font(u * 0.13, 600, 112)), "k": QFontMetricsF(theme.font(u * 0.24, 600, 100)),
+             "a": QFontMetricsF(theme.font(u * 0.24, 600, 100))}
+
+    pad = 6.0
+
+    def cuts(x0: float) -> bool:
+        for row in rows:
+            x = x0
+            for text, width_u, kind in row:
+                if text:
+                    left = x + u * 0.028 + u * 0.085 + u * 0.1
+                    right = left + fonts[kind].horizontalAdvance(text)
+                    if (left < pad and right > -pad) or (right > width - pad and left < width + pad):
+                        return True
+                x += width_u * u
+        return False
+
+    for step in range(0, 300, 2):
+        if not cuts(target - step):
+            return target - step
+    return target
+
+
+def og_image(path: Path, lang: str = "it") -> None:
+    before, after, rows = OG[lang]
     w, h = 1200, 630
     image, p = _canvas(w, h)
     margin = 72.0
@@ -67,8 +108,8 @@ def og_image(path: Path) -> None:
     p.setFont(line1)
     fm = QFontMetricsF(line1)
     base1 = 236.0
-    p.drawText(QPointF(margin, base1), "Tieni premuto")
-    x = margin + fm.horizontalAdvance("Tieni premuto ")
+    p.drawText(QPointF(margin, base1), before)
+    x = margin + fm.horizontalAdvance(before + " ")
     cap = QRectF(x, base1 - size * 0.86, size * 1.1, size * 1.06)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(QColor(theme.ACCENT_SKIRT))
@@ -82,7 +123,7 @@ def og_image(path: Path) -> None:
     p.drawText(QPointF(face.x() + size * 0.16, face.y() + size * 0.1 + QFontMetricsF(small).ascent() * 0.82), "K")
     p.setPen(QColor(theme.LEGEND))
     p.setFont(theme.font(size, 400, 100))
-    p.drawText(QPointF(margin, base1 + size * 1.08), "e di’ «Ressy, sveglia!»")
+    p.drawText(QPointF(margin, base1 + size * 1.08), after)
 
     u = 104.0
     top_y = 398.0
@@ -91,12 +132,7 @@ def og_image(path: Path) -> None:
     p.drawRect(QRectF(0, top_y - 10, w, h - top_y + 10))
     p.setBrush(QColor(theme.PLATE_EDGE))
     p.drawRect(QRectF(0, top_y - 10, w, 1))
-    x0 = -150.0
-    rows = [
-        [("Tab", 1.5, "mod")] + [(c, 1, "a") for c in "QWERTYUIOP"] + [("é", 1, "a"), ("*", 1, "a"), ("", 1.5, "a")],
-        [("Bloc Maiusc", 1.75, "mod")] + [(c, 1, "a") for c in "ASDFGHJ"] + [("K", 1, "k")] + [(c, 1, "a") for c in "Lòàù"],
-        [("Maiusc", 1.25, "mod")] + [(c, 1, "a") for c in "<ZXCVBNM,.-"] + [("", 2.75, "mod")],
-    ]
+    x0 = -150.0 if lang == "it" else _keyboard_x0(rows, u, w)
     for r, row in enumerate(rows):
         x = x0
         y = top_y + r * u
@@ -123,8 +159,9 @@ def main() -> None:
     logo.save_ico(str(web / "favicon.ico"))
     apple_touch_icon(assets / "apple-touch-icon.png")
     og_image(assets / "og.png")
+    og_image(assets / "og-en.png", "en")
     del app
-    for name in ("favicon.ico", "assets/ressy-mark.svg", "assets/apple-touch-icon.png", "assets/og.png"):
+    for name in ("favicon.ico", "assets/ressy-mark.svg", "assets/apple-touch-icon.png", "assets/og.png", "assets/og-en.png"):
         print("wrote", web / name)
 
 

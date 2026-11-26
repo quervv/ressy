@@ -13,6 +13,7 @@ from pathlib import Path
 from ..speech.textnorm import normalize, similarity
 from . import winapi
 from .registry import Tool, ToolContext, ToolError, params
+from ..i18n import tr
 
 log = logging.getLogger("ressy.apps")
 
@@ -449,20 +450,62 @@ def _describe(window: winapi.Window) -> str:
     return f"{proc}: {window.title[:80]}"
 
 
+READY_TIMEOUT_S = 20.0
+READY_AGAIN_S = 4.0
+
+
+def _real_window(window: winapi.Window) -> bool:
+    width, height = winapi.window_size(window.hwnd)
+    return width >= 240 and height >= 160 and "updater" not in window.title.lower()
+
+
+def wait_until_ready(name: str, before: set[int], timeout: float = READY_TIMEOUT_S) -> winapi.Window | None:
+    deadline = time.monotonic() + timeout
+    while True:
+        windows = [w for w in _matching_windows(name) if _real_window(w)]
+        fresh = [w for w in windows if w.hwnd not in before]
+        front = winapi.foreground_window()
+        ready = fresh[0] if fresh else next((w for w in windows if w.hwnd == front), None)
+        if ready is not None:
+            winapi.wait_input_idle(ready.pid, max(0.5, min(5.0, deadline - time.monotonic())))
+            return ready
+        if time.monotonic() >= deadline:
+            return windows[0] if windows else None
+        time.sleep(0.3)
+
+
+def _bring_up(name: str, before: set[int], timeout: float) -> bool:
+    window = wait_until_ready(name, before, timeout)
+    if window is None:
+        return False
+    if winapi.input_desktop_available() and winapi.foreground_window() != window.hwnd:
+        winapi.focus_window(window.hwnd)
+    time.sleep(0.5)
+    return True
+
+
 def open_app(ctx: ToolContext, args: dict) -> str:
     name = args["name"].strip()
     index = ctx.services.apps
     entry, alternatives = index.find(name)
     if entry is not None:
+        before = {w.hwnd for w in _matching_windows(entry.name)}
         launch(entry)
-        return f"Ho avviato {entry.name}."
+        if entry.app_id.startswith(_GAME_URL):
+            return tr("Ho avviato {name}: il gioco si apre tra poco.").format(name=entry.name)
+        if _bring_up(entry.name, before, READY_AGAIN_S if before else READY_TIMEOUT_S):
+            return tr("Ho aperto {name}: è pronto.").format(name=entry.name)
+        return tr("Ho avviato {name}, ma la sua finestra non si vede ancora (forse è nell'area di notifica).").format(name=entry.name)
+    before = {w.hwnd for w in _matching_windows(name)}
     builtin = _launch_builtin(name)
     if builtin is not None:
-        return f"Ho avviato {name}."
+        if _bring_up(name, before, READY_AGAIN_S if before else 8.0):
+            return tr("Ho aperto {name}: è pronto.").format(name=name)
+        return tr("Ho avviato {name}.").format(name=name)
     if alternatives:
         names = ", ".join(a.name for a in alternatives[:4])
-        raise ToolError(f"Non ho trovato '{name}' con certezza. Forse intendevi: {names}?")
-    raise ToolError(f"Non trovo nessun programma chiamato '{name}' nel menu Start.")
+        raise ToolError(tr("Non ho trovato '{name}' con certezza. Forse intendevi: {names}?").format(name=name, names=names))
+    raise ToolError(tr("Non trovo nessun programma chiamato '{name}' nel menu Start.").format(name=name))
 
 
 def close_app(ctx: ToolContext, args: dict) -> str:
@@ -480,7 +523,7 @@ def close_app(ctx: ToolContext, args: dict) -> str:
             if pname in exe_names:
                 pids.add(proc.info["pid"])
     if not windows and not pids:
-        raise ToolError(f"Non vedo finestre aperte di '{name}'.")
+        raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=name))
 
     own = os.getpid()
     for window in windows:
@@ -490,13 +533,12 @@ def close_app(ctx: ToolContext, args: dict) -> str:
         still = [w for w in windows if winapi.user32.IsWindow(w.hwnd) and winapi.user32.IsWindowVisible(w.hwnd)]
         if still:
             return (
-                f"Ho chiesto a {name} di chiudersi, ma {len(still)} finestra/e è ancora aperta "
-                "(forse chiede di salvare). Posso forzare la chiusura se vuoi, perdendo le modifiche non salvate."
+                tr("Ho chiesto a {name} di chiudersi, ma {len} finestra/e è ancora aperta (forse chiede di salvare). Posso forzare la chiusura se vuoi, perdendo le modifiche non salvate.").format(name=name, len=len(still))
             )
         alive = [pid for pid in pids if psutil.pid_exists(pid)]
         if alive:
-            return f"Ho chiuso le finestre di {name}; il programma resta attivo in background (area di notifica)."
-        return f"Ho chiuso {name}."
+            return tr("Ho chiuso le finestre di {name}; il programma resta attivo in background (area di notifica).").format(name=name)
+        return tr("Ho chiuso {name}.").format(name=name)
 
     killed = 0
     for pid in pids:
@@ -512,28 +554,28 @@ def close_app(ctx: ToolContext, args: dict) -> str:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     if not killed and not windows:
-        raise ToolError(f"Non sono riuscita a chiudere {name} (permessi insufficienti?).")
-    return f"Ho chiuso {name} forzatamente."
+        raise ToolError(tr("Non sono riuscita a chiudere {name} (permessi insufficienti?).").format(name=name))
+    return tr("Ho chiuso {name} forzatamente.").format(name=name)
 
 
 def list_windows(ctx: ToolContext, args: dict) -> str:
     windows = winapi.top_windows()
     if not windows:
-        return "Non ci sono finestre aperte."
+        return tr("Non ci sono finestre aperte.")
     lines = [_describe(w) for w in windows[:25]]
-    return "Finestre aperte:\n" + "\n".join(lines)
+    return tr("Finestre aperte:\n") + "\n".join(lines)
 
 
 def focus_app(ctx: ToolContext, args: dict) -> str:
     name = args["name"].strip()
     windows = _matching_windows(name)
     if not windows:
-        raise ToolError(f"Non vedo finestre aperte di '{name}'.")
+        raise ToolError(tr("Non vedo finestre aperte di '{name}'.").format(name=name))
     if not winapi.input_desktop_available():
-        raise ToolError("Il PC è bloccato: non posso cambiare finestra finché non viene sbloccato.")
+        raise ToolError(tr("Il PC è bloccato: non posso cambiare finestra finché non viene sbloccato."))
     if winapi.focus_window(windows[0].hwnd):
-        return f"Ho portato in primo piano {windows[0].title[:60]}."
-    raise ToolError("Windows non mi ha permesso di portare la finestra in primo piano.")
+        return tr("Ho portato in primo piano {value}.").format(value=windows[0].title[:60])
+    raise ToolError(tr("Windows non mi ha permesso di portare la finestra in primo piano."))
 
 
 TOOLS = [
@@ -543,6 +585,7 @@ TOOLS = [
         params({"name": {"type": "string", "description": "nome del programma"}}, ["name"]),
         open_app,
         timeout=40,
+        uses_screen=True,
     ),
     Tool(
         "close_app",
@@ -560,5 +603,6 @@ TOOLS = [
         params({"name": {"type": "string"}}, ["name"]),
         focus_app,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
 ]

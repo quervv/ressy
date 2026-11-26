@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 
 from ..speech.textnorm import normalize, similarity
 from .registry import Tool, ToolContext, ToolError, params
+from ..i18n import tr
 
 log = logging.getLogger("ressy.reminders")
 
@@ -33,10 +34,10 @@ class Reminder:
         due = dt.datetime.fromtimestamp(self.due)
         today = dt.date.today()
         if due.date() == today:
-            return f"oggi alle {due:%H:%M}"
+            return tr("oggi alle {due:%H:%M}").format(due=due)
         if due.date() == today + dt.timedelta(days=1):
-            return f"domani alle {due:%H:%M}"
-        return f"il {due:%d/%m} alle {due:%H:%M}"
+            return tr("domani alle {due:%H:%M}").format(due=due)
+        return tr("il {due:%d/%m} alle {due:%H:%M}").format(due=due)
 
 
 Announce = Callable[[Reminder, bool], Awaitable[None]]
@@ -149,22 +150,22 @@ def parse_due(minutes: float | None, at: str | None, now: dt.datetime | None = N
     now = now or dt.datetime.now()
     if minutes is not None:
         if minutes <= 0:
-            raise ToolError("Il promemoria deve essere nel futuro.")
+            raise ToolError(tr("Il promemoria deve essere nel futuro."))
         due = now + dt.timedelta(minutes=minutes)
     elif at:
         match = _TIME.match(at)
         if match is None:
-            raise ToolError("Orario non valido: usa il formato HH:MM.")
+            raise ToolError(tr("Orario non valido: usa il formato HH:MM."))
         hour, minute = int(match.group(1)), int(match.group(2) or 0)
         if hour > 23 or minute > 59:
-            raise ToolError("Orario non valido.")
+            raise ToolError(tr("Orario non valido."))
         due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if due <= now:
             due += dt.timedelta(days=1)
     else:
-        raise ToolError("Quando? Indica tra quanti minuti oppure l'orario (HH:MM).")
+        raise ToolError(tr("Quando? Indica tra quanti minuti oppure l'orario (HH:MM)."))
     if (due - now).total_seconds() > MAX_AHEAD_S:
-        raise ToolError("Posso ricordare cose al massimo tra 30 giorni.")
+        raise ToolError(tr("Posso ricordare cose al massimo tra 30 giorni."))
     return due.timestamp()
 
 
@@ -174,35 +175,35 @@ async def reminder_tool(ctx: ToolContext, args: dict) -> str:
     if action == "add":
         text = (args.get("text") or "").strip()
         if not text:
-            raise ToolError("Cosa devo ricordarti?")
+            raise ToolError(tr("Cosa devo ricordarti?"))
         due = parse_due(args.get("minutes"), args.get("at"))
         channel = ctx.channel
         reminder = service.add(text, due, channel.kind if channel.remote else "", channel.user_id if channel.remote else "")
-        return f"Promemoria impostato {reminder.when()}: {reminder.text}."
+        return tr("Promemoria impostato {when}: {text}.").format(when=reminder.when(), text=reminder.text)
     if action == "list":
         items = service.list()
         if not items:
-            return "Non ci sono promemoria."
-        return "Promemoria:\n" + "\n".join(f"[{r.id}] {r.when()}: {r.text}" for r in items)
+            return tr("Non ci sono promemoria.")
+        return tr("Promemoria:\n") + "\n".join(f"[{r.id}] {r.when()}: {r.text}" for r in items)
     if action == "cancel":
         items = service.list()
         wanted_id = (args.get("id") or "").strip().lower()
         if wanted_id:
             removed = service.cancel(wanted_id)
             if removed is None:
-                raise ToolError(f"Nessun promemoria con codice {wanted_id}.")
-            return f"Ho cancellato il promemoria {removed.when()}: {removed.text}."
+                raise ToolError(tr("Nessun promemoria con codice {wanted_id}.").format(wanted_id=wanted_id))
+            return tr("Ho cancellato il promemoria {when}: {text}.").format(when=removed.when(), text=removed.text)
         text = normalize(args.get("text") or "")
         if not items:
-            raise ToolError("Non ci sono promemoria da cancellare.")
+            raise ToolError(tr("Non ci sono promemoria da cancellare."))
         if not text and len(items) > 1:
-            raise ToolError("Quale promemoria? " + "; ".join(f"[{r.id}] {r.text}" for r in items))
+            raise ToolError(tr("Quale promemoria? ") + "; ".join(f"[{r.id}] {r.text}" for r in items))
         target = items[0] if not text else max(items, key=lambda r: similarity(normalize(r.text), text))
         if text and similarity(normalize(target.text), text) < 0.5 and text not in normalize(target.text):
-            raise ToolError("Non trovo quel promemoria.")
+            raise ToolError(tr("Non trovo quel promemoria."))
         service.cancel(target.id)
-        return f"Ho cancellato il promemoria {target.when()}: {target.text}."
-    raise ToolError("Azione non valida.")
+        return tr("Ho cancellato il promemoria {when}: {text}.").format(when=target.when(), text=target.text)
+    raise ToolError(tr("Azione non valida."))
 
 
 TOOLS = [

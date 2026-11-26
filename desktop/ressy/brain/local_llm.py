@@ -19,6 +19,7 @@ from typing import Any, Callable
 import httpx
 
 from ..config import LOCAL_LLM_MODELS
+from ..i18n import N_, language, tr
 from .groq import ChatResult, GroqError
 
 log = logging.getLogger("ressy.llm.local")
@@ -37,7 +38,7 @@ START_TIMEOUT_S = 120
 LOCAL_TOOLS = (
     "open_app", "close_app", "focus_app", "open_url", "web_search", "play_youtube", "media_control", "set_volume",
     "weather", "take_screenshot", "system_status", "reminder", "create_folder", "open_folder", "list_windows",
-    "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer",
+    "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer", "wait",
 )
 _MAX_HISTORY = 2
 
@@ -103,7 +104,7 @@ def install_runtime(archive: Path, target: Path | None = None) -> Path:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     if digest.hexdigest() != LLAMA_SHA256:
-        raise OSError("il motore AI scaricato non corrisponde a quello ufficiale")
+        raise OSError(tr("il motore AI scaricato non corrisponde a quello ufficiale"))
     target = target or runtime_dir()
     with zipfile.ZipFile(archive) as zf:
         for info in zf.infolist():
@@ -114,7 +115,7 @@ def install_runtime(archive: Path, target: Path | None = None) -> Path:
                 while chunk := src.read(1 << 20):
                     dst.write(chunk)
     if not (target / "llama-server.exe").is_file():
-        raise OSError("llama-server.exe non trovato nell'archivio")
+        raise OSError(tr("llama-server.exe non trovato nell'archivio"))
     (target / _READY_MARK).write_text(LLAMA_TAG, encoding="utf-8")
     return target
 
@@ -167,12 +168,31 @@ _EXAMPLES = (
     ("che tempo fa a Torino?", {"azione": "weather", "argomenti": {"city": "Torino"}, "risposta": ""}),
     ("come stai?", {"azione": "rispondi", "argomenti": {}, "risposta": "Benissimo, grazie! Cosa faccio per te?"}),
 )
+_EXAMPLES_EN = (
+    ("open spotify", {"azione": "open_app", "argomenti": {"name": "Spotify"}, "risposta": ""}),
+    ("play lofi on youtube", {"azione": "play_youtube", "argomenti": {"query": "lofi"}, "risposta": ""}),
+    ("what's the weather in London?", {"azione": "weather", "argomenti": {"city": "London"}, "risposta": ""}),
+    ("how are you?", {"azione": "rispondi", "argomenti": {}, "risposta": "Very well, thanks! What can I do for you?"}),
+)
 
 
-def build_prompt(tools: list[dict[str, Any]], user_name: str = "") -> str:
-    who = f" di {user_name}" if user_name else ""
+def build_prompt(tools: list[dict[str, Any]], user_name: str = "", lang: str | None = None) -> str:
     lines = "\n".join(_tool_line(t) for t in tools)
     names = {(t.get("function") or {}).get("name") for t in tools}
+    if (lang or language()) == "en":
+        whose = f"{user_name}'s" if user_name else "this"
+        examples = "\n".join(
+            f"User: {said}\nYou: {json.dumps(answer, ensure_ascii=False)}"
+            for said, answer in _EXAMPLES_EN if answer["azione"] in names or answer["azione"] == "rispondi"
+        )
+        return (
+            f"You are Ressy, the voice assistant on {whose} PC. You speak English, in short and kind sentences.\n"
+            "For each request choose ONE action: the right tool below, or \"rispondi\" to talk.\n"
+            "If the user asks you to do something on the PC use a tool; never say you did it without using it.\n"
+            "If you don't know something or can't do it, say so briefly. Don't make things up.\n\n"
+            f"Tools:\n{lines}\n\nExamples:\n{examples}"
+        )
+    who = f" di {user_name}" if user_name else ""
     examples = "\n".join(
         f"Utente: {said}\nTu: {json.dumps(answer, ensure_ascii=False)}"
         for said, answer in _EXAMPLES if answer["azione"] in names or answer["azione"] == "rispondi"
@@ -227,18 +247,19 @@ def to_local_messages(messages: list[dict[str, Any]], system: str) -> list[dict[
                                   ensure_ascii=False)
             out.append({"role": "assistant", "content": text})
         elif role == "tool":
-            out.append({"role": "user", "content": f"Risultato di {message.get('name')}: {message.get('content')}"})
+            out.append({"role": "user", "content": f"{tr('Risultato di ')}{message.get('name')}: {message.get('content')}"})
         else:
             out.append({"role": "user", "content": str(message.get("content") or "")})
-    last_user = max((i for i, m in enumerate(out) if m["role"] == "user" and not m["content"].startswith("Risultato di ")),
+    last_user = max((i for i, m in enumerate(out) if m["role"] == "user" and not m["content"].startswith(tr("Risultato di "))),
                     default=0)
     start = max(0, last_user - _MAX_HISTORY)
     return [{"role": "system", "content": system}, *out[start:]]
 
 
-_CLAIMS_DONE = re.compile(r"^\s*(fatto|ho (?:aperto|avviato|scritto|mandato|inviato|messo|chiuso|cercato|impostato))\b",
+_CLAIMS_DONE = re.compile(r"^\s*(fatto|ho (?:aperto|avviato|scritto|mandato|inviato|messo|chiuso|cercato|impostato)"
+                          r"|done|i(?:'ve| have)? (?:opened|started|written|wrote|sent|put|closed|searched|set))\b",
                           re.I)
-_CANT_DO = "Questo con l'AI sul PC non riesco a farlo. Con una chiave online (Groq o Gemini, gratis) sì."
+_CANT_DO = N_("Questo con l'AI sul PC non riesco a farlo. Con una chiave online (Groq o Gemini, gratis) sì.")
 
 
 def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
@@ -253,7 +274,7 @@ def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
     reply = str(data.get("risposta") or "").strip()
     if action == "rispondi" or action not in allowed:
         if allowed and _CLAIMS_DONE.match(reply):
-            reply = _CANT_DO
+            reply = tr(_CANT_DO)
         return {"role": "assistant", "content": reply}
     return {
         "role": "assistant",
@@ -277,9 +298,9 @@ def result_reply(messages: list[dict[str, Any]]) -> str | None:
         except ValueError:
             result = {}
         text = str(result.get("esito") or "") if result.get("ok") else \
-            "Non ci sono riuscita: " + str(result.get("errore") or "errore sconosciuto")
+            tr("Non ci sono riuscita: ") + str(result.get("errore") or tr("errore sconosciuto"))
         parts.append(text.strip())
-    return " ".join(reversed([p for p in parts if p])) or "Fatto."
+    return " ".join(reversed([p for p in parts if p])) or tr("Fatto.")
 
 
 def _repeat_guard(message: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -372,7 +393,7 @@ class LlamaServer:
                 return
             self._stop_locked()
             if not is_downloaded(name):
-                raise GroqError("Il modello AI sul PC non è ancora scaricato (Impostazioni › Intelligenza).",
+                raise GroqError(tr("Il modello AI sul PC non è ancora scaricato (Impostazioni › Intelligenza)."),
                                 code="model_missing", provider="PC")
             from ..paths import log_dir
 
@@ -397,7 +418,7 @@ class LlamaServer:
                 if self.process.poll() is not None:
                     code = self.process.returncode
                     self.process = None
-                    raise GroqError(f"Il motore AI sul PC si è chiuso all'avvio (codice {code}).",
+                    raise GroqError(tr("Il motore AI sul PC si è chiuso all'avvio (codice {code}).").format(code=code),
                                     code="local_failed", provider="PC")
                 try:
                     if httpx.get(f"{self.base_url}/health", timeout=2).status_code == 200:
@@ -407,7 +428,7 @@ class LlamaServer:
                     pass
                 time.sleep(0.3)
             self._stop_locked()
-            raise GroqError("Il motore AI sul PC non è partito in tempo.", code="local_failed", provider="PC")
+            raise GroqError(tr("Il motore AI sul PC non è partito in tempo."), code="local_failed", provider="PC")
 
     def _stop_locked(self) -> None:
         process, self.process = self.process, None
@@ -486,7 +507,8 @@ class LocalLLMClient:
             )
         self._touch()
         if response.status_code >= 400:
-            raise GroqError(f"Il motore AI sul PC ha risposto {response.status_code}.", status=response.status_code,
+            raise GroqError(tr("Il motore AI sul PC ha risposto {status}.").format(status=response.status_code),
+                            status=response.status_code,
                             code="local_failed", provider=self.NAME)
         out = response.json()
         self._calls += 1
@@ -509,11 +531,12 @@ class LocalLLMClient:
             raise
         except Exception as exc:
             log.warning("local AI failed", exc_info=True)
-            raise GroqError("Il modello AI sul PC non è riuscito a rispondere.", code="local_failed",
+            raise GroqError(tr("Il modello AI sul PC non è riuscito a rispondere."), code="local_failed",
                             provider=self.NAME) from exc
 
     async def web_answer(self, question: str, *, language: str = "it") -> str:
-        raise GroqError("Il modello sul PC non può cercare sul web.", code="no_web", status=400, provider=self.NAME)
+        raise GroqError(tr("Il modello sul PC non può cercare sul web."), code="no_web", status=400,
+                        provider=self.NAME)
 
     async def list_models(self, key: str | None = None) -> list[str]:
         return installed()

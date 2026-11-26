@@ -70,9 +70,19 @@ SLEEP_PHRASES = frozenset(
         "a dopo",
         "buonanotte",
         "go to sleep",
+        "go back to sleep",
         "thats all",
         "that s all",
+        "thats it",
+        "that s it",
         "thank you thats all",
+        "thank you that s all",
+        "thanks thats all",
+        "thanks that s all",
+        "you can go",
+        "see you later",
+        "good night",
+        "goodnight",
     }
 )
 
@@ -134,6 +144,8 @@ def loose_wake(transcript: str) -> WakeMatch:
     last = -1
     for index, (word, _, _) in enumerate(spans):
         if _word_ok(word, NAME) or _wake_word(word):
+            last = index
+        elif last >= 0 and last == index - 1 and word == "up" and _wake_word(spans[last][0]):
             last = index
         elif last >= 0:
             break

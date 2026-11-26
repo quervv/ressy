@@ -11,6 +11,7 @@ import aiohttp
 
 from .. import __version__
 from ..config import Settings
+from ..i18n import tr
 
 log = logging.getLogger("ressy.remote")
 
@@ -139,7 +140,7 @@ class RemoteClient:
                 continue
             delay = 60.0 if outcome == "rate_limited" else backoff * random.uniform(0.8, 1.2)
             backoff = min(backoff * 2, 30.0)
-            self._set_state(OFFLINE, f"nuovo tentativo tra {int(delay)} s")
+            self._set_state(OFFLINE, tr("nuovo tentativo tra {seconds} s").format(seconds=int(delay)))
             await self._wait_wake(delay)
 
     async def _connect_once(self) -> str:
@@ -180,7 +181,7 @@ class RemoteClient:
                                           aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED):
                         break
                 if ws.close_code == CLOSE_REPLACED:
-                    self._set_state(REPLACED, "Ressy si è collegata al server da un altro PC con la stessa identità.")
+                    self._set_state(REPLACED, tr("Ressy si è collegata al server da un altro PC con la stessa identità."))
                     return REPLACED
                 log.info("server connection closed (code %s)", ws.close_code)
                 return "welcomed"
@@ -196,7 +197,7 @@ class RemoteClient:
         finally:
             self._ws = None
             if self._pair_waiter is not None and not self._pair_waiter.done():
-                self._pair_waiter.set_exception(RemoteError("Connessione al server persa."))
+                self._pair_waiter.set_exception(RemoteError(tr("Connessione al server persa.")))
 
     def _handle_first(self, message: aiohttp.WSMessage) -> str:
         if message.type != aiohttp.WSMsgType.TEXT:
@@ -218,7 +219,7 @@ class RemoteClient:
             text = str(data.get("message") or "")
             log.warning("server refused this PC: %s %s", code, text)
             if code == "auth_failed":
-                self._set_state(AUTH_FAILED, text or "Identità del PC non valida.")
+                self._set_state(AUTH_FAILED, text or tr("Identità del PC non valida."))
                 return AUTH_FAILED
             if code == "unsupported_protocol":
                 self._set_state(OUTDATED, text or "Aggiorna Ressy.")
@@ -255,7 +256,7 @@ class RemoteClient:
             reply = await self._on_command(data)
         except Exception:
             log.exception("command handler crashed")
-            reply = {"ok": False, "text": "Errore interno di Ressy sul PC."}
+            reply = {"ok": False, "text": tr("Errore interno di Ressy sul PC.")}
         try:
             await self._send({"type": "reply", "id": request_id, **reply})
         except Exception:
@@ -264,7 +265,7 @@ class RemoteClient:
     async def _send(self, payload: dict[str, Any]) -> None:
         ws = self._ws
         if ws is None or ws.closed:
-            raise RemoteError("Non connessa al server.")
+            raise RemoteError(tr("Non connessa al server."))
         async with self._send_lock:
             await ws.send_str(json.dumps(payload, ensure_ascii=False))
 
@@ -274,7 +275,7 @@ class RemoteClient:
 
     async def request_pair_code(self) -> dict[str, Any]:
         if not self.online:
-            raise RemoteError("Ressy non è connessa al server: controlla la connessione.")
+            raise RemoteError(tr("Ressy non è connessa al server: controlla la connessione."))
         loop = asyncio.get_running_loop()
         self._pair_waiter = loop.create_future()
         await self._send({"type": "pair_request"})

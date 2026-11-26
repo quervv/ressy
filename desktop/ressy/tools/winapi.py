@@ -7,6 +7,8 @@ import uuid
 from ctypes import wintypes
 from dataclasses import dataclass
 
+from ..i18n import tr
+
 log = logging.getLogger("ressy.winapi")
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -109,8 +111,8 @@ def send_inputs(inputs: list[INPUT]) -> None:
     if sent != len(inputs):
         err = ctypes.get_last_error()
         raise InputError(
-            "Windows ha bloccato la tastiera simulata (finestra di un amministratore o PC bloccato?)"
-            if err in (0, 5) else f"SendInput non riuscito (errore {err})"
+            tr("Windows ha bloccato la tastiera simulata (finestra di un amministratore o PC bloccato?)")
+            if err in (0, 5) else tr("SendInput non riuscito (errore {err})").format(err=err)
         )
 
 
@@ -131,7 +133,7 @@ def parse_keys(spec: str) -> list[int]:
     codes: list[int] = []
     for part in parts:
         if part not in VK:
-            raise ValueError(f"tasto sconosciuto: {part}")
+            raise ValueError(tr("tasto sconosciuto: {key}").format(key=part))
         codes.append(VK[part])
     return codes
 
@@ -301,7 +303,7 @@ def click(x: int, y: int, *, right: bool = False, double: bool = False) -> None:
     INPUT_MOUSE = 0
     down, up = (0x0008, 0x0010) if right else (0x0002, 0x0004)
     if not user32.SetCursorPos(int(x), int(y)):
-        raise InputError("Non riesco a spostare il mouse.")
+        raise InputError(tr("Non riesco a spostare il mouse."))
     time.sleep(0.05)
     presses = []
     for _ in range(2 if double else 1):
@@ -466,11 +468,11 @@ def set_clipboard_text(text: str) -> None:
     data = text.encode("utf-16-le") + b"\x00\x00"
     handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
     if not handle:
-        raise OSError("memoria insufficiente per gli appunti")
+        raise OSError(tr("memoria insufficiente per gli appunti"))
     pointer = kernel32.GlobalLock(handle)
     if not pointer:
         kernel32.GlobalFree(handle)
-        raise OSError("impossibile preparare gli appunti")
+        raise OSError(tr("impossibile preparare gli appunti"))
     ctypes.memmove(pointer, data, len(data))
     kernel32.GlobalUnlock(handle)
     for _ in range(20):
@@ -479,7 +481,7 @@ def set_clipboard_text(text: str) -> None:
         time.sleep(0.05)
     else:
         kernel32.GlobalFree(handle)
-        raise OSError("gli appunti sono occupati da un altro programma")
+        raise OSError(tr("gli appunti sono occupati da un altro programma"))
     try:
         user32.EmptyClipboard()
         if not user32.SetClipboardData(CF_UNICODETEXT, handle):
@@ -540,3 +542,59 @@ def suspend() -> bool:
         powrprof.SetSuspendState.argtypes = [wintypes.BOOLEAN, wintypes.BOOLEAN, wintypes.BOOLEAN]
         powrprof.SetSuspendState.restype = wintypes.BOOLEAN
     return bool(powrprof.SetSuspendState(False, False, False))
+
+
+SYNCHRONIZE = 0x00100000
+PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+WAIT_TIMEOUT = 0x102
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
+user32.WaitForInputIdle.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+user32.WaitForInputIdle.restype = wintypes.DWORD
+
+
+def wait_input_idle(pid: int, timeout: float = 5.0) -> bool:
+    handle = None
+    for access in (SYNCHRONIZE | PROCESS_QUERY_INFORMATION, SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION):
+        handle = kernel32.OpenProcess(access, False, pid)
+        if handle:
+            break
+    if not handle:
+        return False
+    try:
+        return user32.WaitForInputIdle(handle, max(0, int(timeout * 1000))) == 0
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class SHFILEOPSTRUCTW(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", wintypes.HWND),
+        ("wFunc", wintypes.UINT),
+        ("pFrom", wintypes.LPCWSTR),
+        ("pTo", wintypes.LPCWSTR),
+        ("fFlags", ctypes.c_uint16),
+        ("fAnyOperationsAborted", wintypes.BOOL),
+        ("hNameMappings", ctypes.c_void_p),
+        ("lpszProgressTitle", wintypes.LPCWSTR),
+    ]
+
+
+FO_DELETE = 3
+FOF_SILENT = 0x0004
+FOF_NOCONFIRMATION = 0x0010
+FOF_ALLOWUNDO = 0x0040
+FOF_NOERRORUI = 0x0400
+shell32.SHFileOperationW.argtypes = [ctypes.POINTER(SHFILEOPSTRUCTW)]
+shell32.SHFileOperationW.restype = ctypes.c_int
+
+
+def recycle(path: str) -> bool:
+    op = SHFILEOPSTRUCTW(
+        hwnd=None, wFunc=FO_DELETE, pFrom=path + "\0", pTo=None,
+        fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,
+    )
+    return shell32.SHFileOperationW(ctypes.byref(op)) == 0 and not op.fAnyOperationsAborted

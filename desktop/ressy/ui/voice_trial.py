@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
+from ..i18n import tr
 
 log = logging.getLogger("ressy.trial")
 
@@ -26,9 +27,9 @@ class Trial:
 
 
 TRIALS = [
-    Trial("wake", "Ressy, sveglia!", "Così la svegli: tieni premuto K e dillo."),
-    Trial("weather", "Che meteo c'è?", "Ressy capisce la domanda e legge il meteo."),
-    Trial("site", "Apri time.is sul browser", "Ressy apre davvero il sito nel browser."),
+    Trial("wake", tr("Ressy, sveglia!"), tr("Così la svegli: tieni premuto K e dillo.")),
+    Trial("weather", tr("Che meteo c'è?"), tr("Ressy capisce la domanda e legge il meteo.")),
+    Trial("site", tr("Apri time.is sul browser"), tr("Ressy apre davvero il sito nel browser.")),
 ]
 
 
@@ -80,7 +81,7 @@ class TalkButton(QPushButton):
     held = Signal(bool)
 
     def __init__(self) -> None:
-        super().__init__("Tieni premuto e parla")
+        super().__init__(tr("Tieni premuto e parla"))
         self.setObjectName("primary")
         self.setMinimumHeight(52)
         self.setMinimumWidth(260)
@@ -138,8 +139,7 @@ class VoiceTrial(QWidget):
             row.setObjectName("trialRow")
             row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             row.setStyleSheet(
-                f"QWidget#trialRow {{ background: {theme.MODS}; border: 1px solid #383A42;"
-                f" border-bottom: 3px solid {theme.MODS_SKIRT}; border-radius: 10px; }}"
+                "QWidget#trialRow {{ background: {MODS}; border: 1px solid #383A42; border-bottom: 3px solid {MODS_SKIRT}; border-radius: 10px; }}".format(MODS=theme.MODS, MODS_SKIRT=theme.MODS_SKIRT)
             )
             h = QHBoxLayout(row)
             h.setContentsMargins(14, 12, 14, 12)
@@ -148,7 +148,7 @@ class VoiceTrial(QWidget):
             h.addWidget(check, 0, Qt.AlignmentFlag.AlignTop)
             col = QVBoxLayout()
             col.setSpacing(3)
-            say = QLabel(f"Di' «<b>{trial.say}</b>»")
+            say = QLabel(tr("Di' «<b>{say}</b>»").format(say=trial.say))
             say.setFont(theme.font(15, 500))
             say.setStyleSheet("background: transparent; border: none;")
             detail = QLabel(trial.help)
@@ -171,7 +171,7 @@ class VoiceTrial(QWidget):
         right.setSpacing(8)
         mic_row = QHBoxLayout()
         mic_row.setSpacing(10)
-        mic_label = QLabel("Microfono")
+        mic_label = QLabel(tr("Microfono"))
         mic_label.setObjectName("hint")
         self.mic_choice = QComboBox()
         self.mic_choice.setMinimumWidth(260)
@@ -179,7 +179,7 @@ class VoiceTrial(QWidget):
         mic_row.addWidget(mic_label)
         mic_row.addWidget(self.mic_choice, 1)
         right.addLayout(mic_row)
-        self.status = QLabel("Preparo il microfono e il modello…")
+        self.status = QLabel(tr("Preparo il microfono e il modello…"))
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
         self.meter = QProgressBar()
@@ -203,7 +203,7 @@ class VoiceTrial(QWidget):
             detail.setText(next(t.help for t in TRIALS if t.key == key))
         self._mark_current()
         self.talk.setEnabled(False)
-        self.status.setText("Preparo il microfono e il modello…")
+        self.status.setText(tr("Preparo il microfono e il modello…"))
         self._fill_mics(getattr(settings, "mic_device", ""))
         threading.Thread(target=self._prepare, name="ressy-trial-prepare", daemon=True).start()
 
@@ -216,7 +216,7 @@ class VoiceTrial(QWidget):
 
         self.mic_choice.blockSignals(True)
         self.mic_choice.clear()
-        self.mic_choice.addItem("Predefinito di Windows", "")
+        self.mic_choice.addItem(tr("Predefinito di Windows"), "")
         for name in devices.input_devices():
             if "mapper" not in name.lower():
                 self.mic_choice.addItem(name, name)
@@ -231,7 +231,7 @@ class VoiceTrial(QWidget):
         if self._mic is None:
             return
         self.stop()
-        self.status.setText("Cambio microfono…")
+        self.status.setText(tr("Cambio microfono…"))
         threading.Thread(target=self._reopen_mic, name="ressy-trial-mic", daemon=True).start()
 
     def _reopen_mic(self) -> None:
@@ -263,8 +263,7 @@ class VoiceTrial(QWidget):
         if self.settings is not None:
             self.settings.mic_device = name
         self.status.setText(
-            f"Il microfono predefinito di Windows non manda suono: uso «{name}». "
-            "Puoi sceglierne un altro qui sopra."
+            tr("Il microfono predefinito di Windows non manda suono: uso «{name}». Puoi sceglierne un altro qui sopra.").format(name=name)
         )
 
     def stop(self) -> None:
@@ -296,17 +295,16 @@ class VoiceTrial(QWidget):
         if error.startswith("mic:"):
             self.no_microphone = True
             self.status.setText(
-                f"<span style='color:#FF8C73'>Non trovo un microfono</span> ({error[4:]}). "
-                "Collegane uno e riapri l'installazione, oppure vai avanti e prova dopo."
+                tr("<span style='color:#FF8C73'>Non trovo un microfono</span> ({value}). Collegane uno e riapri l'installazione, oppure vai avanti e prova dopo.").format(value=error[4:])
             )
             self.completed.emit(False)
             return
         if error:
-            self.status.setText(f"<span style='color:#FF8C73'>Non riesco a preparare la prova</span>: {error}")
+            self.status.setText(tr("<span style='color:#FF8C73'>Non riesco a preparare la prova</span>: {error}").format(error=error))
             return
         self.talk.setEnabled(True)
         self.talk.setFocus()
-        self.status.setText("Tieni premuto il pulsante (o la barra spaziatrice), parla, poi lascia.")
+        self.status.setText(tr("Tieni premuto il pulsante (o la barra spaziatrice), parla, poi lascia."))
 
     def _on_frame(self, frame: Any, db: float) -> None:
         if self._recording:
@@ -325,7 +323,7 @@ class VoiceTrial(QWidget):
                 self._frames = []
             self._recording = True
             self._started = time.monotonic()
-            self.status.setText("Ti ascolto… lascia quando hai finito.")
+            self.status.setText(tr("Ti ascolto… lascia quando hai finito."))
             return
         if not self._recording:
             return
@@ -335,13 +333,13 @@ class VoiceTrial(QWidget):
         if self._mic is None:
             return
         if time.monotonic() - self._started < 0.4 or not frames:
-            self.status.setText("Tieni premuto mentre parli, poi lascia.")
+            self.status.setText(tr("Tieni premuto mentre parli, poi lascia."))
             return
         self._busy = True
         self.talk.setEnabled(False)
         trial = TRIALS[self._index]
         self.rows[trial.key][0].set_state("busy")
-        self.status.setText("Ci penso…")
+        self.status.setText(tr("Ci penso…"))
         threading.Thread(target=self._run, args=(trial, frames), name="ressy-trial", daemon=True).start()
 
     def _run(self, trial: Trial, frames: list[Any]) -> None:
@@ -364,26 +362,26 @@ class VoiceTrial(QWidget):
             transcript = await self._stt.transcribe_pcm(pcm, RATE, lenient=trial.key == "wake")
             heard = transcript.text
             if not heard:
-                return False, "", "Non ho sentito parole: avvicinati al microfono e riprova."
+                return False, "", tr("Non ho sentito parole: avvicinati al microfono e riprova.")
             if trial.key == "wake":
                 from ..speech.wake import loose_wake, match_wake
 
                 ok = match_wake(heard, self.settings.wake_phrases).matched or loose_wake(heard).matched
-                return ok, heard, "" if ok else "Non era la frase di risveglio: riprova."
+                return ok, heard, "" if ok else tr("Non era la frase di risveglio: riprova.")
             brain = _trial_brain(self.settings, llm)
             from ..tools.registry import Channel
 
             result = await asyncio.wait_for(brain.respond(heard, Channel("voice")), timeout=45)
             wanted = "weather" if trial.key == "weather" else "open_url"
             ok = any(p.startswith(f"{wanted}:") for p in result.performed)
-            return ok, heard, result.text if ok else (result.text or "Non ho capito cosa fare: riprova.")
+            return ok, heard, result.text if ok else (result.text or tr("Non ho capito cosa fare: riprova."))
         finally:
             await llm.aclose()
 
     def _on_result(self, key: str, ok: bool, heard: str, detail: str) -> None:
         self._busy = False
         check, _, label = self.rows[key]
-        heard_html = f"Ho sentito «{heard}». " if heard else ""
+        heard_html = tr("Ho sentito «{heard}». ").format(heard=heard) if heard else ""
         if ok:
             self.passed.add(key)
             check.set_state("ok")
@@ -395,13 +393,13 @@ class VoiceTrial(QWidget):
             label.setText(f"{heard_html}<span style='color:#FF8C73'>{detail}</span>")
         if self._index >= len(TRIALS):
             self.talk.setEnabled(False)
-            self.status.setText(f"<span style='color:{theme.BACKLIGHT}'>Tutto a posto</span>: Ressy ti sente e ti capisce.")
+            self.status.setText(tr("<span style='color:{BACKLIGHT}'>Tutto a posto</span>: Ressy ti sente e ti capisce.").format(BACKLIGHT=theme.BACKLIGHT))
             self.stop()
             self.completed.emit(True)
             return
         self.talk.setEnabled(True)
         self.talk.setFocus()
-        self.status.setText("Tieni premuto il pulsante (o la barra spaziatrice), parla, poi lascia.")
+        self.status.setText(tr("Tieni premuto il pulsante (o la barra spaziatrice), parla, poi lascia."))
 
     def _mark_current(self) -> None:
         for number, trial in enumerate(TRIALS):
@@ -438,15 +436,15 @@ def settings_for_trial(base: Any, changes: dict[str, Any]) -> Any:
 def _error_text(exc: BaseException) -> str:
     from ..brain.groq import GroqAuthError, GroqError, GroqRateLimited, GroqUnavailable
 
-    name = getattr(exc, "provider", "") or "il provider"
+    name = getattr(exc, "provider", "") or tr("il provider")
     if isinstance(exc, GroqError) and name == "PC":
         return str(exc)
     if isinstance(exc, GroqAuthError):
-        return f"La chiave di {name} non è valida: torna indietro e controllala."
+        return tr("La chiave di {name} non è valida: torna indietro e controllala.").format(name=name)
     if isinstance(exc, GroqRateLimited):
         return str(exc)
     if isinstance(exc, GroqUnavailable):
-        return f"Non riesco a raggiungere {name}: controlla la connessione."
+        return tr("Non riesco a raggiungere {name}: controlla la connessione.").format(name=name)
     if isinstance(exc, asyncio.TimeoutError):
-        return "Ci ho messo troppo: riprova."
-    return f"Qualcosa non è andato ({type(exc).__name__}): riprova."
+        return tr("Ci ho messo troppo: riprova.")
+    return tr("Qualcosa non è andato ({name}): riprova.").format(name=type(exc).__name__)

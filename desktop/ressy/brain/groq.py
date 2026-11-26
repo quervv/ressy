@@ -9,6 +9,7 @@ from typing import Any, Callable
 import httpx
 
 from .. import __version__
+from ..i18n import tr
 
 log = logging.getLogger("ressy.groq")
 
@@ -119,7 +120,7 @@ class GroqClient:
         key = (key if key is not None else self._api_key() or "").strip()
         if not key:
             raise GroqAuthError(
-                f"Manca la chiave API di {self.NAME}: inseriscila nelle impostazioni di Ressy.", status=401, provider=self.NAME
+                tr("Manca la chiave API di {NAME}: inseriscila nelle impostazioni di Ressy.").format(NAME=self.NAME), status=401, provider=self.NAME
             )
         return {"Authorization": f"Bearer {key}"}
 
@@ -140,11 +141,11 @@ class GroqClient:
         status = response.status_code
         name = self.NAME
         if status == 401 or (status == 400 and "api key" in message.lower()):
-            raise GroqAuthError(f"La chiave API di {name} non è valida.", status=status, code=code, provider=name)
+            raise GroqAuthError(tr("La chiave API di {name} non è valida.").format(name=name), status=status, code=code, provider=name)
         if status == 403:
-            raise GroqAuthError(message or f"Accesso negato da {name}.", status=status, code=code, provider=name)
+            raise GroqAuthError(message or tr("Accesso negato da {name}.").format(name=name), status=status, code=code, provider=name)
         raise GroqError(
-            message or f"Errore {name} {status}", status=status, code=code, retry_after=_retry_after(response),
+            message or tr("Errore {name} {status}").format(name=name, status=status), status=status, code=code, retry_after=_retry_after(response),
             provider=name,
         )
 
@@ -152,10 +153,10 @@ class GroqClient:
         try:
             response = await self._http().request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
-            raise GroqUnavailable(f"{self.NAME} non risponde (timeout).", provider=self.NAME) from exc
+            raise GroqUnavailable(tr("{NAME} non risponde (timeout).").format(NAME=self.NAME), provider=self.NAME) from exc
         except httpx.HTTPError as exc:
             raise GroqUnavailable(
-                f"Non riesco a contattare {self.NAME}: controlla la connessione.", provider=self.NAME
+                tr("Non riesco a contattare {NAME}: controlla la connessione.").format(NAME=self.NAME), provider=self.NAME
             ) from exc
         self._note_usage(path, response, kwargs)
         self._raise_for(response)
@@ -235,11 +236,11 @@ class GroqClient:
                 return ChatResult(message=message, model=model, finish_reason=choice.get("finish_reason"))
         if rate_limited and rate_limited == len(models):
             raise GroqRateLimited(
-                f"Ho raggiunto il limite di richieste del tuo account {self.NAME}: riprova tra un minuto.",
+                tr("Ho raggiunto il limite di richieste del tuo account {NAME}: riprova tra un minuto.").format(NAME=self.NAME),
                 status=429,
                 provider=self.NAME,
             )
-        raise last_error or GroqError(f"Nessun modello {self.NAME} disponibile.", provider=self.NAME)
+        raise last_error or GroqError(tr("Nessun modello {NAME} disponibile.").format(NAME=self.NAME), provider=self.NAME)
 
     async def web_answer(self, question: str, *, language: str = "it") -> str:
         system = (
@@ -295,7 +296,7 @@ class GroqClient:
                 log.warning("transcription with %s failed: %s", candidate, exc)
                 if exc.status == 400 and exc.code not in ("model_not_found", "model_decommissioned"):
                     raise
-        raise last_error or GroqError("Trascrizione non disponibile.")
+        raise last_error or GroqError(tr("Trascrizione non disponibile."))
 
     async def list_models(self, key: str | None = None) -> list[str]:
         response = await self._request("GET", "/models", headers=self._auth(key))

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from .. import __version__
 from ..config import LOCAL_STT_MODELS
+from ..i18n import tr
 from ..paths import app_dir
 
 log = logging.getLogger("ressy.stt.local")
@@ -157,7 +158,7 @@ def _ogg_packets(data: bytes) -> list[bytes]:
     pos = 0
     while pos + 27 <= len(data):
         if data[pos:pos + 4] != b"OggS":
-            raise ValueError("non è un file Ogg")
+            raise ValueError(tr("non è un file Ogg"))
         segments = data[pos + 26]
         table = data[pos + 27:pos + 27 + segments]
         pos += 27 + segments
@@ -175,10 +176,10 @@ def decode_opus_ogg(data: bytes, rate: int = RATE) -> np.ndarray:
     import numpy as np
 
     if not opus.is_loaded() and not opus._load_default():
-        raise RuntimeError("libopus non disponibile")
+        raise RuntimeError(tr("libopus non disponibile"))
     packets = _ogg_packets(data)
     if not packets or not packets[0].startswith(b"OpusHead"):
-        raise ValueError("non è una nota vocale Opus")
+        raise ValueError(tr("non è una nota vocale Opus"))
     pre_skip = struct.unpack_from("<H", packets[0], 10)[0] if len(packets[0]) >= 12 else 0
     decoder = opus.Decoder()
     pcm = bytearray()

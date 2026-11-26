@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from ..config import Settings
 from ..paths import app_dir
+from ..i18n import tr
 
 log = logging.getLogger("ressy.bot")
 
@@ -63,7 +64,7 @@ class LocalBot:
     async def start(self) -> str:
         await self.stop()
         if not self.settings.has_bot_token:
-            raise BotError("Manca il token del bot.")
+            raise BotError(tr("Manca il token del bot."))
         server_main = _import_server()
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[int] = loop.create_future()
@@ -90,7 +91,7 @@ class LocalBot:
             self.port = await asyncio.wait_for(asyncio.shield(ready), timeout=30)
         except asyncio.TimeoutError as exc:
             await self.stop()
-            raise BotError("Il bot non è partito in tempo.") from exc
+            raise BotError(tr("Il bot non è partito in tempo.")) from exc
         await asyncio.sleep(0)
         log.info("bot running on 127.0.0.1:%d", self.port)
         return self.url
@@ -112,7 +113,7 @@ def describe(exc: BaseException) -> str:
     name = type(exc).__name__
     text = str(exc)
     if name in ("InvalidToken", "LoginFailure") or "Unauthorized" in text or "401" in text:
-        return "Il token del bot non è valido: copialo di nuovo da BotFather o dal Discord Developer Portal."
+        return tr("Il token del bot non è valido: copialo di nuovo da BotFather o dal Discord Developer Portal.")
     if name in ("NetworkError", "TimedOut", "ClientConnectorError", "ConnectError"):
-        return "Non riesco a raggiungere Telegram o Discord: controlla la connessione."
-    return f"Il bot si è fermato ({name})."
+        return tr("Non riesco a raggiungere Telegram o Discord: controlla la connessione.")
+    return tr("Il bot si è fermato ({name}).").format(name=name)

@@ -15,6 +15,7 @@ from typing import Callable
 import httpx
 
 from . import __version__
+from .i18n import tr
 
 log = logging.getLogger("ressy.update")
 
@@ -104,7 +105,7 @@ def download(release: Release, progress: Progress | None = None, cancel: threadi
                     if progress is not None:
                         progress(done, total)
         if digest.hexdigest() != release.sha256:
-            raise OSError("il file scaricato non corrisponde a quello pubblicato: riprova più tardi")
+            raise OSError(tr("il file scaricato non corrisponde a quello pubblicato: riprova più tardi"))
         os.replace(part, target)
         return target
     finally:

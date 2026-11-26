@@ -7,20 +7,21 @@ from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from . import logo, theme
+from ..i18n import tr
 
 if TYPE_CHECKING:
     from ..core.controller import Controller
     from .bridge import UiBridge
 
 PRESENCE_TEXT = {
-    "online": "Online",
-    "connecting": "Mi collego…",
-    "offline": "Offline",
-    "disabled": "Disattivato",
-    "auth_failed": "Rifiutato dal server",
-    "outdated": "Da aggiornare",
-    "replaced": "Attiva su un altro PC",
-    "bot_error": "Bot fermo",
+    "online": tr("Online"),
+    "connecting": tr("Mi collego…"),
+    "offline": tr("Offline"),
+    "disabled": tr("Disattivato"),
+    "auth_failed": tr("Rifiutato dal server"),
+    "outdated": tr("Da aggiornare"),
+    "replaced": tr("Attiva su un altro PC"),
+    "bot_error": tr("Bot fermo"),
 }
 
 
@@ -45,16 +46,16 @@ class Tray(QObject):
         self.header = menu.addAction("Ressy")
         self.header.setEnabled(False)
         menu.addSeparator()
-        self.wake_action = menu.addAction("Sveglia Ressy")
+        self.wake_action = menu.addAction(tr("Sveglia Ressy"))
         self.wake_action.triggered.connect(self._toggle_wake)
-        self.stop_action = menu.addAction("Interrompi la voce")
+        self.stop_action = menu.addAction(tr("Interrompi la voce"))
         self.stop_action.triggered.connect(controller.stop_speaking)
         menu.addSeparator()
-        menu.addAction("Collega Telegram o Discord…").triggered.connect(open_pairing)
-        menu.addAction("Impostazioni…").triggered.connect(lambda: open_settings(""))
+        menu.addAction(tr("Collega Telegram o Discord…")).triggered.connect(open_pairing)
+        menu.addAction(tr("Impostazioni…")).triggered.connect(lambda: open_settings(""))
         menu.addSeparator()
         self._quit_separator = menu.actions()[-1]
-        menu.addAction("Esci da Ressy").triggered.connect(quit_app)
+        menu.addAction(tr("Esci da Ressy")).triggered.connect(quit_app)
         self.menu = menu
         self.icon.setContextMenu(menu)
         self.icon.activated.connect(self._activated)
@@ -68,7 +69,7 @@ class Tray(QObject):
     def add_update_action(self, callback: Callable[[], None]):
         from PySide6.QtGui import QAction
 
-        action = QAction("Aggiorna Ressy…", self.menu)
+        action = QAction(tr("Aggiorna Ressy…"), self.menu)
         action.triggered.connect(callback)
         action.setVisible(False)
         self.menu.insertAction(self._quit_separator, action)
@@ -102,11 +103,11 @@ class Tray(QObject):
         awake = self._state != "asleep"
         online = self._remote == "online"
         self.icon.setIcon(logo.icon(pressed=awake, backlight=online, awake=awake))
-        label = theme.STATE_LABELS.get(self._state, "Dorme")
-        presence = PRESENCE_TEXT.get(self._remote, "Offline")
+        label = theme.STATE_LABELS.get(self._state, tr("Dorme"))
+        presence = PRESENCE_TEXT.get(self._remote, tr("Offline"))
         key = self.controller.settings.hotkey_name or "K"
-        self.header.setText(f"Ressy · {label} · Telegram/Discord: {presence}")
-        self.wake_action.setText("Metti Ressy a dormire" if awake else "Sveglia Ressy")
+        self.header.setText(tr("Ressy · {label} · Telegram/Discord: {presence}").format(label=label, presence=presence))
+        self.wake_action.setText(tr("Metti Ressy a dormire") if awake else tr("Sveglia Ressy"))
         self.stop_action.setVisible(self._state == "speaking")
-        tip = f"Ressy · {label} · Telegram/Discord: {presence}\nTieni premuto {key} e di' «Ressy, sveglia!»"
+        tip = tr("Ressy · {label} · Telegram/Discord: {presence}\nTieni premuto {key} e di' «Ressy, sveglia!»").format(label=label, presence=presence, key=key)
         self.icon.setToolTip(tip[:127])

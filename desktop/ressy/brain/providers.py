@@ -18,6 +18,7 @@ from .groq import (
     GroqUnavailable,
     strip_citations,
 )
+from ..i18n import tr
 
 log = logging.getLogger("ressy.providers")
 
@@ -41,7 +42,7 @@ class GeminiClient(GroqClient):
     def _key(self, key: str | None = None) -> str:
         key = (key if key is not None else self._api_key() or "").strip()
         if not key:
-            raise GroqAuthError("Manca la chiave API di Gemini.", status=401, provider=self.NAME)
+            raise GroqAuthError(tr("Manca la chiave API di Gemini."), status=401, provider=self.NAME)
         return key
 
     async def _native(self, model: str, body: dict[str, Any], timeout: float = 60.0) -> dict[str, Any]:
@@ -53,9 +54,9 @@ class GeminiClient(GroqClient):
                 timeout=httpx.Timeout(timeout, connect=10.0),
             )
         except httpx.TimeoutException as exc:
-            raise GroqUnavailable("Gemini non risponde (timeout).", provider=self.NAME) from exc
+            raise GroqUnavailable(tr("Gemini non risponde (timeout)."), provider=self.NAME) from exc
         except httpx.HTTPError as exc:
-            raise GroqUnavailable("Non riesco a contattare Gemini.", provider=self.NAME) from exc
+            raise GroqUnavailable(tr("Non riesco a contattare Gemini."), provider=self.NAME) from exc
         if self.usage is not None:
             try:
                 if response.status_code == 429:
@@ -87,7 +88,7 @@ class GeminiClient(GroqClient):
     async def transcribe(self, data: bytes, *, filename: str, mime: str, model: str, language: str | None = None,
                          prompt: str | None = None) -> dict[str, Any]:
         lang = "italiano" if (language or "it") == "it" else "English"
-        hint = f" Nomi che potrebbero comparire: {prompt}" if prompt else ""
+        hint = tr(" Nomi che potrebbero comparire: {prompt}").format(prompt=prompt) if prompt else ""
         result = await self._native(
             model,
             {
@@ -179,7 +180,7 @@ class OpenRouterClient(GroqClient):
         if not models or list(models) == ["auto"]:
             models = (await self.free_models())[:4]
         if not models:
-            raise GroqUnavailable("OpenRouter non ha modelli gratuiti disponibili adesso.", provider=self.NAME)
+            raise GroqUnavailable(tr("OpenRouter non ha modelli gratuiti disponibili adesso."), provider=self.NAME)
         return await super().chat(messages, models=models, **kwargs)
 
     async def web_answer(self, question: str, *, language: str = "it") -> str:
@@ -301,7 +302,7 @@ class ClaudeClient:
 
         key = (key if key is not None else self._api_key() or "").strip()
         if not key:
-            raise GroqAuthError("Manca la chiave API di Claude.", status=401, provider=self.NAME)
+            raise GroqAuthError(tr("Manca la chiave API di Claude."), status=401, provider=self.NAME)
         if key != self._client_key or self._client is None:
             self._client = anthropic.AsyncAnthropic(api_key=key, timeout=60.0, max_retries=2)
             self._client_key = key
@@ -318,17 +319,17 @@ class ClaudeClient:
 
         name = "Claude"
         if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
-            return GroqAuthError("La chiave API di Claude non è valida.", status=401, provider=name)
+            return GroqAuthError(tr("La chiave API di Claude non è valida."), status=401, provider=name)
         if isinstance(exc, anthropic.RateLimitError):
             return GroqRateLimited(
-                "Ho raggiunto il limite di richieste del tuo account Claude: riprova tra un minuto.",
+                tr("Ho raggiunto il limite di richieste del tuo account Claude: riprova tra un minuto."),
                 status=429, provider=name,
             )
         if isinstance(exc, (anthropic.APIConnectionError, anthropic.APITimeoutError)):
-            return GroqUnavailable("Non riesco a contattare Claude: controlla la connessione.", provider=name)
+            return GroqUnavailable(tr("Non riesco a contattare Claude: controlla la connessione."), provider=name)
         if isinstance(exc, anthropic.APIStatusError):
-            return GroqError(f"Errore Claude {exc.status_code}: {exc.message}", status=exc.status_code, provider=name)
-        return GroqError(f"Errore Claude: {type(exc).__name__}", provider=name)
+            return GroqError(tr("Errore Claude {status_code}: {message}").format(status_code=exc.status_code, message=exc.message), status=exc.status_code, provider=name)
+        return GroqError(tr("Errore Claude: {name}").format(name=type(exc).__name__), provider=name)
 
     async def _create(self, model: str, **kwargs: Any):
         import anthropic
@@ -385,7 +386,7 @@ class ClaudeClient:
         response = await self._create(model, **kwargs)
         if response.stop_reason == "refusal":
             return ChatResult(
-                message={"role": "assistant", "content": "Mi dispiace, con questo non posso aiutarti."},
+                message={"role": "assistant", "content": tr("Mi dispiace, con questo non posso aiutarti.")},
                 model=model, finish_reason="refusal",
             )
         return ChatResult(message=_from_anthropic(response.content), model=model, finish_reason=response.stop_reason)
@@ -510,10 +511,10 @@ class LLMRouter:
         if isinstance(last, GroqRateLimited) or last is None:
             first = PROVIDER_NAMES.get(chain[0], chain[0])
             hint = "" if len(chain) > 1 else (
-                " Per non fermarti mai aggiungi una seconda chiave gratuita (Gemini o OpenRouter) nelle impostazioni."
+                tr(" Per non fermarti mai aggiungi una seconda chiave gratuita (Gemini o OpenRouter) nelle impostazioni.")
             )
             raise GroqRateLimited(
-                f"Ho raggiunto il limite di richieste del tuo account {first}: riprova tra un minuto.{hint}",
+                tr("Ho raggiunto il limite di richieste del tuo account {first}: riprova tra un minuto.{hint}").format(first=first, hint=hint),
                 status=429, provider=first,
             )
         raise last
@@ -536,7 +537,7 @@ class LLMRouter:
             except GroqError as exc:
                 last = exc
                 log.warning("web answer with %s failed, trying the next brain", provider)
-        raise last or GroqError("Nessun servizio di ricerca disponibile.")
+        raise last or GroqError(tr("Nessun servizio di ricerca disponibile."))
 
     async def list_models(self, key: str | None = None, provider: str | None = None) -> list[str]:
         return await self.client(provider).list_models(key)

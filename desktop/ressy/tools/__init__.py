@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from .registry import Attachment, Channel, Tool, ToolContext, ToolError, ToolRegistry, params
+from ..i18n import tr
 
 
 def _go_to_sleep(ctx: ToolContext, args: dict) -> str:
     ctx.sleep_requested = True
-    return "Dopo la risposta torno a dormire."
+    return tr("Dopo la risposta torno a dormire.")
 
 
 async def _api_usage(ctx: ToolContext, args: dict) -> str:
     llm = getattr(ctx.services, "llm", None)
     if llm is None or not hasattr(llm, "usage_report"):
-        raise ToolError("Non ho dati sui consumi.")
+        raise ToolError(tr("Non ho dati sui consumi."))
     return await llm.usage_report()
 
 

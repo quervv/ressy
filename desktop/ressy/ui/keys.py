@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QKeyEvent, QKeySequence, QPainter, QPaintEvent
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QWidget
 
 from . import theme
+from ..i18n import tr
 
 UNIT = 44
 
@@ -65,9 +66,9 @@ def key_name(vk: int, text: str = "", qt_key: int = 0) -> str:
     if 0x70 <= vk <= 0x87:
         return f"F{vk - 0x6F}"
     if 0x60 <= vk <= 0x69:
-        return f"Num {vk - 0x60}"
-    named = {0x13: "Pausa", 0x91: "Bloc Scorr", 0x2D: "Ins", 0x6A: "Num *", 0x6B: "Num +", 0x6D: "Num -",
-             0x6E: "Num ,", 0x6F: "Num /"}
+        return tr("Num {value}").format(value=vk - 0x60)
+    named = {0x13: tr("Pausa"), 0x91: tr("Bloc Scorr"), 0x2D: tr("Ins"), 0x6A: tr("Num *"), 0x6B: tr("Num +"), 0x6D: tr("Num -"),
+             0x6E: tr("Num ,"), 0x6F: tr("Num /")}
     if vk in named:
         return named[vk]
     if text and text.isprintable() and not text.isspace():
@@ -76,7 +77,7 @@ def key_name(vk: int, text: str = "", qt_key: int = 0) -> str:
         native = QKeySequence(qt_key).toString(QKeySequence.SequenceFormat.NativeText)
         if native:
             return native
-    return f"Tasto {vk:#04x}"
+    return tr("Tasto {vk:#04x}").format(vk=vk)
 
 
 class KeyCapture(QAbstractButton):
@@ -111,7 +112,7 @@ class KeyCapture(QAbstractButton):
         self.update()
 
     def _update_accessible(self) -> None:
-        self.setAccessibleName(f"Tasto per parlare: {self.name}. Premi per cambiarlo.")
+        self.setAccessibleName(tr("Tasto per parlare: {name}. Premi per cambiarlo.").format(name=self.name))
 
     def _toggle(self) -> None:
         if self._listening:
@@ -163,7 +164,7 @@ class KeyCapture(QAbstractButton):
         p = QPainter(self)
         rect = QRectF(3, 3, self.width() - 6, self.height() - 6)
         if self._listening:
-            paint_keycap(p, rect, "Premi il nuovo tasto (Esc annulla)", pressed=True, font_px=13, focus=True)
+            paint_keycap(p, rect, tr("Premi il nuovo tasto (Esc annulla)"), pressed=True, font_px=13, focus=True)
         else:
             paint_keycap(p, rect, self.name, accent=True, pressed=self.isDown(), hover=self._hover,
                          font_px=18 if len(self.name) <= 2 else 14, width_axis=112, focus=self.hasFocus())
@@ -180,7 +181,7 @@ class CodeKeys(QWidget):
 
     def set_code(self, code: str) -> None:
         self.code = code
-        self.setAccessibleName("Codice di collegamento: " + " ".join(code))
+        self.setAccessibleName(tr("Codice di collegamento: {code}").format(code=" ".join(code)))
         self.updateGeometry()
         self.update()
 

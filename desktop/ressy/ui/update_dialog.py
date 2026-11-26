@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushB
 from .. import __version__, updater
 from . import theme
 from .winframe import style_title_bar
+from ..i18n import tr
 
 log = logging.getLogger("ressy.update")
 
@@ -59,7 +60,7 @@ class UpdateDialog(QDialog):
         self._quit_app = quit_app
         self.release: updater.Release | None = None
         self._cancel = threading.Event()
-        self.setWindowTitle("Ressy · Aggiornamento")
+        self.setWindowTitle(tr("Ressy · Aggiornamento"))
         self.setMinimumWidth(520)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
 
@@ -80,8 +81,8 @@ class UpdateDialog(QDialog):
         self.status = QLabel()
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
-        self.later = QPushButton("Più tardi")
-        self.update_button = QPushButton("Aggiorna")
+        self.later = QPushButton(tr("Più tardi"))
+        self.update_button = QPushButton(tr("Aggiorna"))
         self.update_button.setObjectName("primary")
         self.update_button.setMinimumWidth(130)
         self.later.clicked.connect(self._later)
@@ -108,16 +109,15 @@ class UpdateDialog(QDialog):
         if busy:
             return
         self.release = release
-        self.title.setText(f"È disponibile Ressy {release.version}")
-        self.intro.setText(f"Hai la versione {__version__}. L'aggiornamento richiede un minuto: Ressy si chiude, "
-                           "si aggiorna e riparte da sola. Le tue impostazioni restano.")
+        self.title.setText(tr("È disponibile Ressy {version}").format(version=release.version))
+        self.intro.setText(tr("Hai la versione {version}. L'aggiornamento richiede un minuto: Ressy si chiude, si aggiorna e riparte da sola. Le tue impostazioni restano.").format(version=__version__))
         notes = short_notes(release.notes)
         self.notes.setText(notes)
         self.notes.setVisible(bool(notes))
         self.status.setText("")
         self.bar.hide()
         self.update_button.setEnabled(True)
-        self.update_button.setText("Aggiorna")
+        self.update_button.setText(tr("Aggiorna"))
         self.later.setEnabled(True)
         self.show()
         self.raise_()
@@ -136,10 +136,10 @@ class UpdateDialog(QDialog):
             return
         self._cancel = threading.Event()
         self.update_button.setEnabled(False)
-        self.update_button.setText("Scarico…")
+        self.update_button.setText(tr("Scarico…"))
         self.bar.setValue(0)
         self.bar.show()
-        self.status.setText("Scarico l'aggiornamento…")
+        self.status.setText(tr("Scarico l'aggiornamento…"))
         release, cancel = self.release, self._cancel
         threading.Thread(target=self._download, args=(release, cancel), name="update-download", daemon=True).start()
 
@@ -157,23 +157,23 @@ class UpdateDialog(QDialog):
     def _on_progress(self, done: int, total: int) -> None:
         if total > 0:
             self.bar.setValue(int(100 * done / total))
-            self.status.setText(f"Scarico l'aggiornamento… {done / 1e6:.0f} di {total / 1e6:.0f} MB")
+            self.status.setText(tr("Scarico l'aggiornamento… {value:.0f} di {value2:.0f} MB").format(value=done / 1e6, value2=total / 1e6))
 
     def _on_failed(self, error: str) -> None:
         self.bar.hide()
-        self.status.setText(f"Aggiornamento non riuscito: {error}")
+        self.status.setText(tr("Aggiornamento non riuscito: {error}").format(error=error))
         self.update_button.setEnabled(True)
-        self.update_button.setText("Riprova")
+        self.update_button.setText(tr("Riprova"))
 
     def _on_ready(self, setup: str) -> None:
         from pathlib import Path
 
-        self.status.setText("Installo: Ressy si chiude e riparte tra poco…")
+        self.status.setText(tr("Installo: Ressy si chiude e riparte tra poco…"))
         self.later.setEnabled(False)
         try:
             updater.install(Path(setup))
         except OSError as exc:
-            self._on_failed(f"non riesco ad avviare l'installazione ({exc})")
+            self._on_failed(tr("non riesco ad avviare l'installazione ({exc})").format(exc=exc))
             return
         log.info("update to %s started", self.release.version if self.release else "?")
         QTimer.singleShot(1500, self._quit_app)

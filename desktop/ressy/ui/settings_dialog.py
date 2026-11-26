@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..audio import devices
-from ..config import EDGE_VOICES
+from ..config import EDGE_VOICES, voice_for, wake_phrases_for
 from ..paths import log_dir
 from ..system_integration import autostart_enabled, set_autostart
 from . import logo, theme
@@ -36,13 +36,14 @@ from .brain_setup import BrainSetup, SpeechSetup
 from .keys import KeyCapture, PresenceLight
 from .tray import PRESENCE_TEXT
 from .winframe import style_title_bar
+from ..i18n import LANGUAGES, tr
 
 if TYPE_CHECKING:
     from ..core.controller import Controller
     from .bridge import UiBridge
 
-PAGES = ["Generale", "Intelligenza", "Voce", "Tasto e ascolto", "Da remoto", "Info"]
-VOICE_TEST = "Ciao! Sono Ressy. Questa è la mia voce."
+PAGES = [tr("Generale"), tr("Intelligenza"), tr("Voce"), tr("Tasto e ascolto"), tr("Da remoto"), "Info"]
+VOICE_TEST = tr("Ciao! Sono Ressy. Questa è la mia voce.")
 
 
 def _section(text: str) -> QLabel:
@@ -108,14 +109,17 @@ class SettingsDialog(QDialog):
         bridge: "UiBridge",
         *,
         open_pairing: Callable[[], None],
+        restart: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.controller = controller
         self.settings = controller.settings
         self._open_pairing = open_pairing
+        self._restart = restart
+        self._shown_language = self.settings.language
         self._voice_backup: dict[str, Any] | None = None
-        self.setWindowTitle("Ressy · Impostazioni")
+        self.setWindowTitle(tr("Ressy · Impostazioni"))
         self.setMinimumSize(QSize(860, 660))
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
 
@@ -130,8 +134,7 @@ class SettingsDialog(QDialog):
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setStyleSheet(
-            f"background: {theme.MODS}; border: 1px solid {theme.ACCENT}; border-radius: 8px;"
-            f"padding: 10px 14px; color: {theme.LEGEND};"
+            "background: {MODS}; border: 1px solid {ACCENT}; border-radius: 8px;padding: 10px 14px; color: {LEGEND};".format(MODS=theme.MODS, ACCENT=theme.ACCENT, LEGEND=theme.LEGEND)
         )
         self.banner.hide()
 
@@ -149,9 +152,9 @@ class SettingsDialog(QDialog):
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
 
-        cancel = QPushButton("Annulla")
+        cancel = QPushButton(tr("Annulla"))
         cancel.clicked.connect(self.reject)
-        save = QPushButton("Salva")
+        save = QPushButton(tr("Salva"))
         save.setObjectName("primary")
         save.setDefault(True)
         save.clicked.connect(self._save)
@@ -206,54 +209,59 @@ class SettingsDialog(QDialog):
         return page, layout
 
     def _build_general(self) -> None:
-        _, layout = self._page("Generale")
+        _, layout = self._page(tr("Generale"))
         form = _form()
         self.user_name = QLineEdit()
-        self.user_name.setPlaceholderText("Come vuoi che Ressy ti chiami")
+        self.user_name.setPlaceholderText(tr("Come vuoi che Ressy ti chiami"))
         self.user_name.setMaxLength(40)
-        form.addRow("Il tuo nome", self.user_name)
-        self.language = _combo([("it", "Italiano"), ("en", "English")], "it")
-        form.addRow("Lingua delle risposte", self.language)
+        form.addRow(tr("Il tuo nome"), self.user_name)
+        self.language = _combo(list(LANGUAGES.items()), "it")
+        self.language.currentIndexChanged.connect(self._language_changed)
+        form.addRow(tr("Lingua"), self.language)
         self.home_city = QLineEdit()
-        self.home_city.setPlaceholderText("Automatica (posizione approssimativa del PC)")
+        self.home_city.setPlaceholderText(tr("Automatica (posizione approssimativa del PC)"))
         self.home_city.setMaxLength(80)
-        form.addRow("Città per il meteo", self.home_city)
+        form.addRow(tr("Città per il meteo"), self.home_city)
         layout.addLayout(form)
-        self.autostart = QCheckBox("Avvia Ressy all'accensione del PC")
+        layout.addWidget(_hint(
+            tr("La lingua vale per le finestre, la voce, le risposte e le frasi di risveglio. "
+               "Quando la cambi e salvi, Ressy si riavvia.")
+        ))
+        self.autostart = QCheckBox(tr("Avvia Ressy all'accensione del PC"))
         layout.addWidget(self.autostart)
         layout.addWidget(_hint(
-            "Ressy resta nell'area di notifica, accanto all'orologio. Se non parte con Windows, "
-            "da Telegram e Discord risulterà offline finché non la apri."
+            tr("Ressy resta nell'area di notifica, accanto all'orologio. Se non parte con Windows, "
+            "da Telegram e Discord risulterà offline finché non la apri.")
         ))
         layout.addStretch(1)
 
     def _build_brain(self) -> None:
-        _, layout = self._page("Intelligenza")
+        _, layout = self._page(tr("Intelligenza"))
         layout.addWidget(_hint(
-            "Scegli chi fa ragionare Ressy. Ognuno usa la <b>propria</b> chiave: niente piani condivisi, "
-            "niente limiti di altri. Puoi cambiare quando vuoi."
+            tr("Scegli chi fa ragionare Ressy. Ognuno usa la <b>propria</b> chiave: niente piani condivisi, "
+            "niente limiti di altri. Puoi cambiare quando vuoi.")
         ))
         self.brain = BrainSetup()
         layout.addWidget(self.brain)
-        self.fallback = QCheckBox("Se la chiave scelta è al limite, continua con le altre chiavi inserite")
+        self.fallback = QCheckBox(tr("Se la chiave scelta è al limite, continua con le altre chiavi inserite"))
         layout.addWidget(self.fallback)
-        self.quick = QCheckBox("Esegui i comandi semplici sul PC senza usare l'AI (apri app e siti, meteo, volume…)")
+        self.quick = QCheckBox(tr("Esegui i comandi semplici sul PC senza usare l'AI (apri app e siti, meteo, volume…)"))
         layout.addWidget(self.quick)
-        self.auto_update = QCheckBox("Avvisami quando c'è una nuova versione di Ressy e installala con un clic")
+        self.auto_update = QCheckBox(tr("Avvisami quando c'è una nuova versione di Ressy e installala con un clic"))
         layout.addWidget(self.auto_update)
 
-        layout.addWidget(_section("Consumi delle chiavi"))
+        layout.addWidget(_section(tr("Consumi delle chiavi")))
         self.usage_text = QLabel("")
         self.usage_text.setWordWrap(True)
         self.usage_text.setTextFormat(Qt.TextFormat.RichText)
         self.usage_text.setObjectName("usage")
         layout.addWidget(self.usage_text)
         usage_row = QHBoxLayout()
-        self.usage_refresh = QPushButton("Aggiorna")
+        self.usage_refresh = QPushButton(tr("Aggiorna"))
         self.usage_refresh.clicked.connect(self._refresh_usage)
         usage_row.addWidget(self.usage_refresh)
         self._usage_ready.connect(self._show_usage)
-        usage_row.addWidget(_hint("Puoi anche chiederlo a voce o in chat: «quanto mi resta delle API?»"), 1)
+        usage_row.addWidget(_hint(tr("Puoi anche chiederlo a voce o in chat: «quanto mi resta delle API?»")), 1)
         layout.addLayout(usage_row)
         layout.addStretch(1)
 
@@ -284,19 +292,19 @@ class SettingsDialog(QDialog):
         self.usage_text.setText("<br>".join(lines))
 
     def _build_voice(self) -> None:
-        _, layout = self._page("Voce")
-        layout.addWidget(_section("Capire la voce"))
+        _, layout = self._page(tr("Voce"))
+        layout.addWidget(_section(tr("Capire la voce")))
         self.speech = SpeechSetup()
         layout.addWidget(self.speech)
-        layout.addWidget(_section("La voce di Ressy"))
+        layout.addWidget(_section(tr("La voce di Ressy")))
         form = _form()
         self.tts_engine = _combo(
-            [("edge", "Voce neurale Microsoft (online)"), ("sapi", "Voce di Windows (offline)")], "edge"
+            [("edge", tr("Voce neurale Microsoft (online)")), ("sapi", tr("Voce di Windows (offline)"))], "edge"
         )
         self.tts_engine.currentIndexChanged.connect(self._engine_changed)
-        form.addRow("Motore", self.tts_engine)
+        form.addRow(tr("Motore"), self.tts_engine)
         self.tts_voice = _combo(list(EDGE_VOICES.items()), "")
-        form.addRow("Voce", self.tts_voice)
+        form.addRow(tr("Voce"), self.tts_voice)
         rate_row = QHBoxLayout()
         self.tts_rate = QSlider(Qt.Orientation.Horizontal)
         self.tts_rate.setRange(-50, 50)
@@ -307,64 +315,64 @@ class SettingsDialog(QDialog):
         self.tts_rate.valueChanged.connect(lambda v: self.rate_label.setText(f"{v:+d}%"))
         rate_row.addWidget(self.tts_rate, 1)
         rate_row.addWidget(self.rate_label)
-        form.addRow("Velocità", rate_row)
+        form.addRow(tr("Velocità"), rate_row)
         layout.addLayout(form)
-        self.sounds = QCheckBox("Suoni dell'interfaccia (tasto, risveglio, fine)")
+        self.sounds = QCheckBox(tr("Suoni dell'interfaccia (tasto, risveglio, fine)"))
         layout.addWidget(self.sounds)
         test_row = QHBoxLayout()
-        test = QPushButton("Prova la voce")
+        test = QPushButton(tr("Prova la voce"))
         test.clicked.connect(self._test_voice)
         test_row.addWidget(test)
         test_row.addStretch(1)
         layout.addLayout(test_row)
         layout.addWidget(_hint(
-            "La voce neurale richiede internet; la voce di Windows funziona anche offline. "
-            "Se la prima non risponde, Ressy usa automaticamente la seconda."
+            tr("La voce neurale richiede internet; la voce di Windows funziona anche offline. "
+            "Se la prima non risponde, Ressy usa automaticamente la seconda.")
         ))
         layout.addStretch(1)
 
     def _build_keys(self) -> None:
-        _, layout = self._page("Tasto e ascolto")
+        _, layout = self._page(tr("Tasto e ascolto"))
         form = _form()
         self.hotkey = KeyCapture(self.settings.hotkey_vk, self.settings.hotkey_name)
         self.hotkey.capturing.connect(self._capturing)
         key_row = QHBoxLayout()
         key_row.addWidget(self.hotkey)
         key_row.addStretch(1)
-        form.addRow("Tasto per parlare", key_row)
+        form.addRow(tr("Tasto per parlare"), key_row)
         self.hold_ms = QSpinBox()
         self.hold_ms.setRange(150, 2000)
         self.hold_ms.setSingleStep(50)
         self.hold_ms.setSuffix(" ms")
-        form.addRow("Tienilo premuto per", self.hold_ms)
+        form.addRow(tr("Tienilo premuto per"), self.hold_ms)
         self.wake_phrases = QLineEdit()
-        self.wake_phrases.setPlaceholderText("ressy sveglia, sveglia ressy")
-        form.addRow("Frasi di risveglio", self.wake_phrases)
+        self.wake_phrases.setPlaceholderText(tr("ressy sveglia, sveglia ressy"))
+        form.addRow(tr("Frasi di risveglio"), self.wake_phrases)
         self.listen_mode = _combo(
-            [("continuous", "Ascolta sempre: basta parlare"), ("push_to_talk", "Solo mentre tengo premuto il tasto")],
+            [("continuous", tr("Ascolta sempre: basta parlare")), ("push_to_talk", tr("Solo mentre tengo premuto il tasto"))],
             "continuous",
         )
-        form.addRow("Quando è sveglia", self.listen_mode)
+        form.addRow(tr("Quando è sveglia"), self.listen_mode)
         self.auto_sleep = QSpinBox()
         self.auto_sleep.setRange(15, 3600)
         self.auto_sleep.setSingleStep(15)
-        self.auto_sleep.setSuffix(" s di silenzio")
-        form.addRow("Si addormenta dopo", self.auto_sleep)
+        self.auto_sleep.setSuffix(tr(" s di silenzio"))
+        form.addRow(tr("Si addormenta dopo"), self.auto_sleep)
         self.mic_device = QComboBox()
-        form.addRow("Microfono", self.mic_device)
+        form.addRow(tr("Microfono"), self.mic_device)
         self.output_device = QComboBox()
-        form.addRow("Altoparlanti", self.output_device)
+        form.addRow(tr("Altoparlanti"), self.output_device)
         layout.addLayout(form)
         layout.addWidget(_hint(
-            "Un tocco veloce scrive la lettera come sempre; tenendo premuto parli con Ressy. "
-            "Mentre Ressy dorme il microfono resta chiuso: si apre solo mentre tieni premuto il tasto."
+            tr("Un tocco veloce scrive la lettera come sempre; tenendo premuto parli con Ressy. "
+            "Mentre Ressy dorme il microfono resta chiuso: si apre solo mentre tieni premuto il tasto.")
         ))
         layout.addStretch(1)
 
     def _build_remote(self) -> None:
-        _, layout = self._page("Da remoto")
+        _, layout = self._page(tr("Da remoto"))
         layout.addWidget(_hint(
-            "Ressy non usa un bot condiviso: il bot è tuo, e gira su questo PC o su un tuo server."
+            tr("Ressy non usa un bot condiviso: il bot è tuo, e gira su questo PC o su un tuo server.")
         ))
         self.bot_setup = BotSetup()
         layout.addWidget(self.bot_setup)
@@ -378,35 +386,35 @@ class SettingsDialog(QDialog):
         form = _form()
         self.device_name = QLineEdit()
         self.device_name.setMaxLength(64)
-        form.addRow("Nome di questo PC", self.device_name)
+        form.addRow(tr("Nome di questo PC"), self.device_name)
         layout.addLayout(form)
         pair_row = QHBoxLayout()
-        pair = QPushButton("Collega Telegram o Discord…")
+        pair = QPushButton(tr("Collega Telegram o Discord…"))
         pair.setObjectName("primary")
         pair.clicked.connect(self._open_pairing)
         pair_row.addWidget(pair)
         pair_row.addStretch(1)
         layout.addLayout(pair_row)
-        layout.addWidget(_section("Account collegati"))
+        layout.addWidget(_section(tr("Account collegati")))
         self.links_list = QListWidget()
         self.links_list.setObjectName("links")
         self.links_list.setMinimumHeight(96)
         self.links_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         layout.addWidget(self.links_list)
-        self.speak_remote = QCheckBox("Leggi ad alta voce sul PC le risposte ai comandi remoti")
-        self.notify_remote = QCheckBox("Mostra una notifica sul PC per ogni comando remoto")
+        self.speak_remote = QCheckBox(tr("Leggi ad alta voce sul PC le risposte ai comandi remoti"))
+        self.notify_remote = QCheckBox(tr("Mostra una notifica sul PC per ogni comando remoto"))
         layout.addWidget(self.speak_remote)
         layout.addWidget(self.notify_remote)
-        layout.addWidget(_section("Avanzate"))
+        layout.addWidget(_section(tr("Avanzate")))
         reset_row = QHBoxLayout()
-        reset = QPushButton("Nuova identità per questo PC…")
+        reset = QPushButton(tr("Nuova identità per questo PC…"))
         reset.clicked.connect(self._reset_identity)
         reset_row.addWidget(reset)
         reset_row.addStretch(1)
         layout.addLayout(reset_row)
         layout.addWidget(_hint(
-            "Solo gli account che colleghi con un codice possono comandare questo PC. "
-            "Una nuova identità scollega tutti gli account."
+            tr("Solo gli account che colleghi con un codice possono comandare questo PC. "
+            "Una nuova identità scollega tutti gli account.")
         ))
         layout.addStretch(1)
 
@@ -414,16 +422,16 @@ class SettingsDialog(QDialog):
         _, layout = self._page("Info")
         layout.addWidget(QLabel(f"Ressy {__version__}"))
         layout.addWidget(_hint(
-            "Software libero con licenza MIT. " + _link("ressy.top", "https://ressy.top")
+            tr("Software libero con licenza MIT. ") + _link("ressy.top", "https://ressy.top")
         ))
         layout.addWidget(_hint(
-            "Le chiavi API e l'identità del PC sono cifrate con Windows (DPAPI) e valgono solo per il tuo "
-            "utente su questo PC. I registri non contengono il testo dei messaggi."
+            tr("Le chiavi API e l'identità del PC sono cifrate con Windows (DPAPI) e valgono solo per il tuo "
+            "utente su questo PC. I registri non contengono il testo dei messaggi.")
         ))
         row = QHBoxLayout()
-        logs = QPushButton("Apri la cartella dei registri")
+        logs = QPushButton(tr("Apri la cartella dei registri"))
         logs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir()))))
-        apps = QPushButton("Aggiorna l'elenco dei programmi")
+        apps = QPushButton(tr("Aggiorna l'elenco dei programmi"))
         apps.clicked.connect(self.controller.refresh_apps)
         row.addWidget(logs)
         row.addWidget(apps)
@@ -438,10 +446,10 @@ class SettingsDialog(QDialog):
             self.banner.show()
         else:
             self.banner.hide()
-        if "modello vocale" in reason or "voce con" in reason:
-            self.nav.setCurrentRow(PAGES.index("Voce"))
-        elif not self.settings.provider_key(self.settings.llm_provider) or "chiave" in reason:
-            self.nav.setCurrentRow(PAGES.index("Intelligenza"))
+        if any(word in reason for word in ("modello vocale", "voce con", tr("modello vocale"), tr("voce con"))):
+            self.nav.setCurrentRow(PAGES.index(tr("Voce")))
+        elif not self.settings.provider_key(self.settings.llm_provider) or "chiave" in reason or tr("chiave") in reason:
+            self.nav.setCurrentRow(PAGES.index(tr("Intelligenza")))
             self.brain.focus_key()
         self.show()
         self.raise_()
@@ -456,6 +464,7 @@ class SettingsDialog(QDialog):
         self.error.hide()
         self.user_name.setText(s.user_name)
         self.home_city.setText(s.home_city)
+        self._shown_language = s.language
         self.language.setCurrentIndex(max(0, self.language.findData(s.language)))
         self.autostart.setChecked(autostart_enabled())
 
@@ -507,12 +516,22 @@ class SettingsDialog(QDialog):
     @staticmethod
     def _fill_devices(combo: QComboBox, names: list[str], current: str) -> None:
         combo.clear()
-        combo.addItem("Predefinito di Windows", "")
+        combo.addItem(tr("Predefinito di Windows"), "")
         for name in names:
             combo.addItem(name, name)
         if current and combo.findData(current) < 0:
-            combo.addItem(f"{current} (non collegato)", current)
+            combo.addItem(tr("{current} (non collegato)").format(current=current), current)
         combo.setCurrentIndex(max(0, combo.findData(current)))
+
+    def _language_changed(self) -> None:
+        code = self.language.currentData() or "it"
+        if code == self._shown_language:
+            return
+        self._shown_language = code
+        index = self.tts_voice.findData(voice_for(code, self.tts_voice.currentData() or ""))
+        if index >= 0:
+            self.tts_voice.setCurrentIndex(index)
+        self.wake_phrases.setText(", ".join(wake_phrases_for(code, self._phrases())))
 
     def _engine_changed(self) -> None:
         self.tts_voice.setEnabled(self.tts_engine.currentData() == "edge")
@@ -536,23 +555,23 @@ class SettingsDialog(QDialog):
 
     def _on_remote_state(self, state: str, detail: str) -> None:
         self.presence.set_online(state == "online")
-        text = PRESENCE_TEXT.get(state, "Offline")
+        text = PRESENCE_TEXT.get(state, tr("Offline"))
         explain = {
-            "online": "Puoi comandare questo PC da Telegram e Discord.",
-            "connecting": "Mi sto collegando al bot.",
+            "online": tr("Puoi comandare questo PC da Telegram e Discord."),
+            "connecting": tr("Mi sto collegando al bot."),
             "bot_error": detail,
-            "offline": "Non riesco a raggiungere il server: riprovo da sola.",
-            "disabled": "I comandi da remoto sono disattivati, o manca il token del bot.",
-            "auth_failed": "Il server ha rifiutato questo PC. Prova con una nuova identità.",
-            "outdated": "Questa versione di Ressy è troppo vecchia per il server: aggiornala.",
-            "replaced": "Questa identità è in uso su un altro PC.",
+            "offline": tr("Non riesco a raggiungere il server: riprovo da sola."),
+            "disabled": tr("I comandi da remoto sono disattivati, o manca il token del bot."),
+            "auth_failed": tr("Il server ha rifiutato questo PC. Prova con una nuova identità."),
+            "outdated": tr("Questa versione di Ressy è troppo vecchia per il server: aggiornala."),
+            "replaced": tr("Questa identità è in uso su un altro PC."),
         }.get(state, "")
         self.remote_status.setText(f"<b>{text}</b> · {explain}" if explain else f"<b>{text}</b>")
 
     def _fill_links(self, links: list) -> None:
         self.links_list.clear()
         if not links:
-            item = QListWidgetItem("Nessun account collegato.")
+            item = QListWidgetItem(tr("Nessun account collegato."))
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.links_list.addItem(item)
             return
@@ -561,12 +580,13 @@ class SettingsDialog(QDialog):
             display = str(link.get("display") or link.get("user_id") or "")
             since = ""
             if link.get("linked_at"):
-                since = " · dal " + dt.datetime.fromtimestamp(float(link["linked_at"])).strftime("%d/%m/%Y")
+                when = dt.datetime.fromtimestamp(float(link["linked_at"]))
+                since = tr(" · dal {date}").format(date=when.strftime(tr("%d/%m/%Y")))
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(10, 6, 6, 6)
             label = QLabel(f"<b>{platform}</b> · {display}{since}")
-            unlink = QPushButton("Scollega")
+            unlink = QPushButton(tr("Scollega"))
             unlink.clicked.connect(lambda _=False, l=dict(link), d=display, p=platform: self._unlink(l, d, p))
             h.addWidget(label, 1)
             h.addWidget(unlink)
@@ -577,25 +597,28 @@ class SettingsDialog(QDialog):
 
     def _unlink(self, link: dict, display: str, platform: str) -> None:
         answer = QMessageBox.question(
-            self, "Scollega account",
-            f"Scollegare {display} ({platform})? Non potrà più comandare questo PC finché non lo ricolleghi.",
+            self, tr("Scollega account"),
+            tr("Scollegare {display} ({platform})? Non potrà più comandare questo PC finché non lo ricolleghi.").format(display=display, platform=platform),
         )
         if answer == QMessageBox.StandardButton.Yes:
             self.controller.unlink(str(link.get("platform")), str(link.get("user_id")))
 
     def _reset_identity(self) -> None:
         answer = QMessageBox.question(
-            self, "Nuova identità",
-            "Creare una nuova identità per questo PC? Tutti gli account collegati verranno scollegati "
-            "e dovrai ricollegarli con un nuovo codice.",
+            self, tr("Nuova identità"),
+            tr("Creare una nuova identità per questo PC? Tutti gli account collegati verranno scollegati "
+            "e dovrai ricollegarli con un nuovo codice."),
         )
         if answer == QMessageBox.StandardButton.Yes:
             self.controller.reset_identity()
 
+    def _phrases(self) -> list[str]:
+        return [p.strip().lower() for p in self.wake_phrases.text().replace(";", ",").split(",") if p.strip()]
+
     def _changes(self) -> dict[str, Any] | str:
-        phrases = [p.strip().lower() for p in self.wake_phrases.text().replace(";", ",").split(",") if p.strip()]
+        phrases = self._phrases()
         if not phrases:
-            return "Scrivi almeno una frase di risveglio, per esempio «ressy sveglia»."
+            return tr("Scrivi almeno una frase di risveglio, per esempio «ressy sveglia».")
         brain = self.brain.values()
         keys = {"groq": brain["groq_api_key"], "claude": brain["anthropic_api_key"], "gemini": brain["gemini_api_key"]}
         problem = (self.brain.problem() or self.speech.problem(keys) or self.bot_setup.problem())
@@ -640,13 +663,22 @@ class SettingsDialog(QDialog):
             if self.autostart.isChecked() != autostart_enabled():
                 set_autostart(self.autostart.isChecked())
         except OSError:
-            self.error.setText("Non riesco a modificare l'avvio automatico di Windows.")
+            self.error.setText(tr("Non riesco a modificare l'avvio automatico di Windows."))
             self.error.show()
             return
         if changes:
             self.controller.apply_settings(**changes)
         self._voice_backup = None
         self.accept()
+        if "language" in changes and self._restart is not None:
+            new = changes["language"]
+            title = "Ressy"
+            text = (
+                "Ressy will restart now to speak English." if new == "en"
+                else "Ressy si riavvia adesso per parlare in italiano."
+            )
+            QMessageBox.information(self, title, text)
+            self._restart()
 
     def reject(self) -> None:
         if self._voice_backup is not None:

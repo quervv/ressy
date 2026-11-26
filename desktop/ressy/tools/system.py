@@ -13,6 +13,7 @@ from ..speech.wake import phonetic
 from .apps import launch
 from . import winapi
 from .registry import Attachment, Tool, ToolContext, ToolError, params
+from ..i18n import tr
 
 log = logging.getLogger("ressy.system")
 
@@ -31,11 +32,11 @@ def media_control(ctx: ToolContext, args: dict) -> str:
     action = args["action"]
     winapi.tap(winapi.VK[MEDIA_KEYS[action]])
     return {
-        "play_pause": "Ho premuto play/pausa.",
-        "next": "Traccia successiva.",
-        "previous": "Traccia precedente.",
-        "stop": "Riproduzione fermata.",
-        "mute": "Audio disattivato/riattivato.",
+        "play_pause": tr("Ho premuto play/pausa."),
+        "next": tr("Traccia successiva."),
+        "previous": tr("Traccia precedente."),
+        "stop": tr("Riproduzione fermata."),
+        "mute": tr("Audio disattivato/riattivato."),
     }[action]
 
 
@@ -51,7 +52,7 @@ def set_volume(ctx: ToolContext, args: dict) -> str:
         for _ in range(round(level / 2)):
             presses += [winapi.key_input(up), winapi.key_input(up, up=True)]
         winapi.send_inputs(presses)
-        return f"Volume impostato al {level}%."
+        return tr("Volume impostato al {level}%.").format(level=level)
     if change in ("up", "down"):
         steps = max(1, min(50, int(args.get("steps") or 5)))
         vk = up if change == "up" else down
@@ -59,11 +60,13 @@ def set_volume(ctx: ToolContext, args: dict) -> str:
         for _ in range(steps):
             presses += [winapi.key_input(vk), winapi.key_input(vk, up=True)]
         winapi.send_inputs(presses)
-        return f"Volume {'alzato' if change == 'up' else 'abbassato'} del {steps * 2}%."
+        if change == "up":
+            return tr("Volume alzato del {percent}%.").format(percent=steps * 2)
+        return tr("Volume abbassato del {percent}%.").format(percent=steps * 2)
     if change == "mute":
         winapi.tap(winapi.VK["volume_mute"])
-        return "Audio disattivato/riattivato."
-    raise ToolError("Indica un livello (0-100) oppure change=up/down/mute.")
+        return tr("Audio disattivato/riattivato.")
+    raise ToolError(tr("Indica un livello (0-100) oppure change=up/down/mute."))
 
 
 def take_screenshot(ctx: ToolContext, args: dict) -> str:
@@ -82,8 +85,8 @@ def take_screenshot(ctx: ToolContext, args: dict) -> str:
         buffer = io.BytesIO()
         preview.save(buffer, "JPEG", quality=82, optimize=True)
         ctx.images.append(Attachment(buffer.getvalue(), path.with_suffix(".jpg").name, "image/jpeg"))
-        return f"Screenshot fatto ({image.width}×{image.height}): lo allego alla risposta."
-    return f"Screenshot salvato in Immagini\\Ressy ({path.name})."
+        return tr("Screenshot fatto ({width}×{height}): lo allego alla risposta.").format(width=image.width, height=image.height)
+    return tr("Screenshot salvato in Immagini\\Ressy ({name}).").format(name=path.name)
 
 
 def pc_power(ctx: ToolContext, args: dict) -> str:
@@ -91,22 +94,23 @@ def pc_power(ctx: ToolContext, args: dict) -> str:
     delay = max(0, min(3600, int(args.get("delay_seconds") if args.get("delay_seconds") is not None else 60)))
     if action == "lock":
         if not winapi.lock_workstation():
-            raise ToolError("Windows non ha bloccato il PC.")
-        return "PC bloccato."
+            raise ToolError(tr("Windows non ha bloccato il PC."))
+        return tr("PC bloccato.")
     if action == "sleep":
         ctx.deferred.append(winapi.suspend)
-        return "Metto il PC in sospensione appena ho risposto."
+        return tr("Metto il PC in sospensione appena ho risposto.")
     if action in ("shutdown", "restart"):
         flag = "/s" if action == "shutdown" else "/r"
         subprocess.run(["shutdown", flag, "/t", str(delay)], check=False, creationflags=CREATE_NO_WINDOW)
-        verb = "Spengo" if action == "shutdown" else "Riavvio"
-        return f"{verb} il PC tra {delay} secondi. Per annullare chiedimi di annullare lo spegnimento."
+        if action == "shutdown":
+            return tr("Spengo il PC tra {delay} secondi. Per annullare chiedimi di annullare lo spegnimento.").format(delay=delay)
+        return tr("Riavvio il PC tra {delay} secondi. Per annullare chiedimi di annullare il riavvio.").format(delay=delay)
     if action == "cancel":
         result = subprocess.run(["shutdown", "/a"], check=False, capture_output=True, creationflags=CREATE_NO_WINDOW)
         if result.returncode != 0:
-            return "Non c'era nessuno spegnimento programmato."
-        return "Spegnimento annullato."
-    raise ToolError("Azione non valida.")
+            return tr("Non c'era nessuno spegnimento programmato.")
+        return tr("Spegnimento annullato.")
+    raise ToolError(tr("Azione non valida."))
 
 
 def system_status(ctx: ToolContext, args: dict) -> str:
@@ -114,19 +118,20 @@ def system_status(ctx: ToolContext, args: dict) -> str:
 
     cpu = psutil.cpu_percent(interval=0.4)
     memory = psutil.virtual_memory()
-    parts = [f"CPU {cpu:.0f}%", f"RAM {memory.percent:.0f}% ({memory.used / 2**30:.1f} di {memory.total / 2**30:.1f} GB)"]
+    parts = [f"CPU {cpu:.0f}%", tr("RAM {percent:.0f}% ({used:.1f} di {total:.1f} GB)").format(
+        percent=memory.percent, used=memory.used / 2**30, total=memory.total / 2**30)]
     try:
         disk = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\")
-        parts.append(f"disco {disk.free / 2**30:.0f} GB liberi su {disk.total / 2**30:.0f}")
+        parts.append(tr("disco {value:.0f} GB liberi su {value2:.0f}").format(value=disk.free / 2**30, value2=disk.total / 2**30))
     except OSError:
         pass
     battery = psutil.sensors_battery() if hasattr(psutil, "sensors_battery") else None
     if battery is not None:
-        state = "in carica" if battery.power_plugged else "a batteria"
-        parts.append(f"batteria {battery.percent:.0f}% {state}")
+        charge = tr("batteria {percent:.0f}%, in carica") if battery.power_plugged else tr("batteria {percent:.0f}%, non in carica")
+        parts.append(charge.format(percent=battery.percent))
     uptime = dt.timedelta(seconds=int(time.time() - psutil.boot_time()))
     hours, rem = divmod(uptime.seconds, 3600)
-    parts.append(f"acceso da {uptime.days}g {hours}h {rem // 60}m" if uptime.days else f"acceso da {hours}h {rem // 60}m")
+    parts.append(tr("acceso da {days}g {hours}h {value}m").format(days=uptime.days, hours=hours, value=rem // 60) if uptime.days else tr("acceso da {hours}h {value}m").format(hours=hours, value=rem // 60))
     return "; ".join(parts) + "."
 
 
@@ -204,46 +209,46 @@ def open_folder(ctx: ToolContext, args: dict) -> str:
         folder = pictures_dir()
         folder.mkdir(parents=True, exist_ok=True)
         os.startfile(str(folder))
-        return "Ho aperto la cartella degli screenshot di Ressy."
+        return tr("Ho aperto la cartella degli screenshot di Ressy.")
     key = FOLDER_NAMES.get(name)
     if key is not None:
         path = winapi.known_folder(key)
         if not path or not os.path.isdir(path):
-            raise ToolError("Non trovo quella cartella.")
+            raise ToolError(tr("Non trovo quella cartella."))
         os.startfile(path)
-        return f"Ho aperto la cartella {raw_name}."
+        return tr("Ho aperto la cartella {raw_name}.").format(raw_name=raw_name)
     expanded = os.path.expandvars(os.path.expanduser(raw_name))
     if os.path.isabs(expanded) and os.path.isdir(expanded):
         os.startfile(expanded)
-        return f"Ho aperto la cartella {os.path.basename(expanded.rstrip(chr(92))) or expanded}."
+        return tr("Ho aperto la cartella {value}.").format(value=os.path.basename(expanded.rstrip(chr(92))) or expanded)
     path, near = find_folder(raw_name)
     if path is not None:
         os.startfile(path)
-        return f"Ho aperto la cartella {os.path.basename(path)} ({os.path.dirname(path)})."
+        return tr("Ho aperto la cartella {basename} ({dirname}).").format(basename=os.path.basename(path), dirname=os.path.dirname(path))
     apps = getattr(ctx.services, "apps", None)
     if apps is not None:
         entry, _ = apps.find(raw_name)
         if entry is not None:
             launch(entry)
-            return f"{raw_name} è un programma, non una cartella: l'ho aperto."
-    hint = f" Forse intendevi: {', '.join(near)}?" if near else ""
-    raise ToolError(f"Non trovo una cartella '{raw_name}' nel Desktop, Documenti, Download o nella cartella utente.{hint}")
+            return tr("{raw_name} è un programma, non una cartella: l'ho aperto.").format(raw_name=raw_name)
+    hint = tr(" Forse intendevi: {join}?").format(join=', '.join(near)) if near else ""
+    raise ToolError(tr("Non trovo una cartella '{raw_name}' nel Desktop, Documenti, Download o nella cartella utente.{hint}").format(raw_name=raw_name, hint=hint))
 
 
 def _require_desktop() -> None:
     if not winapi.input_desktop_available():
-        raise ToolError("Il PC è bloccato: non posso usare la tastiera finché non viene sbloccato.")
+        raise ToolError(tr("Il PC è bloccato: non posso usare la tastiera finché non viene sbloccato."))
 
 
 def type_text(ctx: ToolContext, args: dict) -> str:
     text = args["text"]
     if len(text) > 5000:
-        raise ToolError("Testo troppo lungo (massimo 5000 caratteri).")
+        raise ToolError(tr("Testo troppo lungo (massimo 5000 caratteri)."))
     _require_desktop()
     winapi.wait_modifiers_released()
     title = winapi.window_title(winapi.foreground_window())
     winapi.type_text(text)
-    return f"Ho scritto il testo in «{title[:60]}»." if title else "Ho scritto il testo."
+    return tr("Ho scritto il testo in «{value}».").format(value=title[:60]) if title else tr("Ho scritto il testo.")
 
 
 _BLOCKED_COMBOS = ({0x11, 0x12, 0x2E},)
@@ -255,16 +260,16 @@ def press_keys(ctx: ToolContext, args: dict) -> str:
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
     if set(codes) in [set(c) for c in _BLOCKED_COMBOS]:
-        raise ToolError("Questa combinazione non si può inviare.")
+        raise ToolError(tr("Questa combinazione non si può inviare."))
     _require_desktop()
     winapi.wait_modifiers_released()
     winapi.hotkey(*codes)
-    return f"Ho premuto {args['keys']}."
+    return tr("Ho premuto {value}.").format(value=args['keys'])
 
 
 def set_clipboard(ctx: ToolContext, args: dict) -> str:
     winapi.set_clipboard_text(args["text"])
-    return "Testo copiato negli appunti."
+    return tr("Testo copiato negli appunti.")
 
 
 TOOLS = [
@@ -313,6 +318,7 @@ TOOLS = [
         type_text,
         timeout=120,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
     Tool(
         "press_keys",
@@ -320,6 +326,7 @@ TOOLS = [
         params({"keys": {"type": "string"}}, ["keys"]),
         press_keys,
         snapshot_on_error=True,
+        uses_screen=True,
     ),
     Tool(
         "set_clipboard",

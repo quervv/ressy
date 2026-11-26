@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtSvg
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 
+from ..i18n import tr
 from ..paths import resource_path
 
 PLATE = "#17181C"
@@ -22,11 +23,11 @@ REST = "#3A3D46"
 INK = "#17181C"
 
 STATE_LABELS = {
-    "asleep": "Dorme",
-    "listening": "Ascolta",
-    "hearing": "Ascolta",
-    "thinking": "Pensa",
-    "speaking": "Parla",
+    "asleep": tr("Dorme"),
+    "listening": tr("Ascolta"),
+    "hearing": tr("Ascolta"),
+    "thinking": tr("Pensa"),
+    "speaking": tr("Parla"),
 }
 OFFLINE_LABEL = "Offline"
 

@@ -15,6 +15,21 @@ for _name in ("stdout", "stderr"):
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from ressy import i18n
+
+LANG_ARG = "--lang="
+
+
+def _start_language() -> str:
+    for arg in sys.argv[1:]:
+        if arg.startswith(LANG_ARG):
+            return arg[len(LANG_ARG):]
+    return i18n.saved_language() or i18n.system_language()
+
+
+i18n.set_language(_start_language())
+from ressy.i18n import LANGUAGES, tr
+
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import (
@@ -27,6 +42,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QComboBox,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
@@ -35,7 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from ressy import __version__, install
-from ressy.config import Settings
+from ressy.config import Settings, voice_for, wake_phrases_for
 from ressy.ui import logo, theme
 from ressy.ui.bot_setup import TOKEN_HELP, BotSetup, TokenFields, check_token, hint
 from ressy.ui.brain_setup import BrainSetup, SpeechSetup
@@ -43,6 +59,22 @@ from ressy.ui.voice_trial import VoiceTrial, settings_for_trial
 
 
 UPDATE = "--update" in sys.argv[1:]
+
+
+def relaunch_in(code: str) -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith(LANG_ARG)] + [LANG_ARG + code]
+    env = None
+    if getattr(sys, "frozen", False):
+        command = [sys.executable, *args]
+        env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+    else:
+        command = [sys.executable, str(Path(__file__).resolve()), *args]
+    try:
+        subprocess.Popen(command, env=env, close_fds=True)
+    except OSError:
+        traceback.print_exc()
+        return
+    QApplication.quit()
 
 
 def payload_path() -> Path:
@@ -76,7 +108,7 @@ def section(text: str) -> QLabel:
     label = QLabel(text.upper())
     f = theme.font(11, 700, 108)
     label.setFont(f)
-    label.setStyleSheet(f"color: {theme.LEGEND_DIM}; font-size: 11px; font-weight: 700; letter-spacing: 1px;")
+    label.setStyleSheet("color: {LEGEND_DIM}; font-size: 11px; font-weight: 700; letter-spacing: 1px;".format(LEGEND_DIM=theme.LEGEND_DIM))
     return label
 
 
@@ -155,7 +187,7 @@ def copy_payload(folder: Path, progress) -> None:
             rel = Path(*parts[1:]) if parts and parts[0] == "Ressy" else Path(*parts)
             target = (folder / rel).resolve()
             if folder.resolve() not in target.parents:
-                raise RuntimeError(f"percorso non valido nel pacchetto: {member.filename}")
+                raise RuntimeError(tr("Percorso non valido nel pacchetto: {name}").format(name=member.filename))
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(target, "wb") as dst:
                 shutil.copyfileobj(src, dst, 1 << 20)
@@ -183,16 +215,16 @@ class Updater(QObject):
 
     def _run(self) -> None:
         folder = self.folder
-        self.step.emit("Chiudo Ressy…", 5)
+        self.step.emit(tr("Chiudo Ressy…"), 5)
         install.ask_app_to_quit()
         self.server_was_running = install.stop_server()
         if not install.wait_unlocked(folder, 20):
-            raise RuntimeError("Ressy.exe è ancora in uso: chiudi Ressy e riprova.")
-        self.step.emit("Copio i file…", 15)
-        copy_payload(folder, lambda pct: self.step.emit("Copio i file…", 15 + int(75 * pct)))
+            raise RuntimeError(tr("Ressy.exe è ancora in uso: chiudi Ressy e riprova."))
+        self.step.emit(tr("Copio i file…"), 15)
+        copy_payload(folder, lambda pct: self.step.emit(tr("Copio i file…"), 15 + int(75 * pct)))
         size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) // 1024
         install.register_uninstall(folder, size)
-        self.step.emit("Fatto: riavvio Ressy…", 100)
+        self.step.emit(tr("Fatto: riavvio Ressy…"), 100)
 
 
 class UpdateWindow(Backdrop):
@@ -202,7 +234,7 @@ class UpdateWindow(Backdrop):
     def __init__(self, folder: Path) -> None:
         super().__init__()
         self.folder = folder
-        self.setWindowTitle("Aggiorno Ressy")
+        self.setWindowTitle(tr("Aggiorno Ressy"))
         self.setWindowIcon(logo.app_icon())
         self.setFixedSize(QSize(520, 230))
         v = QVBoxLayout(self)
@@ -211,8 +243,8 @@ class UpdateWindow(Backdrop):
         head = QHBoxLayout()
         head.setSpacing(12)
         head.addWidget(Mark(40))
-        head.addWidget(title("Aggiorno Ressy"), 1)
-        version = QLabel(f"versione {__version__}")
+        head.addWidget(title(tr("Aggiorno Ressy")), 1)
+        version = QLabel(tr("versione {version}").format(version=__version__))
         version.setObjectName("hint")
         head.addWidget(version, 0, Qt.AlignmentFlag.AlignBottom)
         v.addLayout(head)
@@ -221,12 +253,12 @@ class UpdateWindow(Backdrop):
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(10)
         v.addWidget(self.bar)
-        self.status = QLabel("Un momento…")
+        self.status = QLabel(tr("Un momento…"))
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
         v.addWidget(self.status)
         v.addStretch(1)
-        self.close_button = QPushButton("Chiudi")
+        self.close_button = QPushButton(tr("Chiudi"))
         self.close_button.clicked.connect(QApplication.quit)
         self.close_button.hide()
         v.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignRight)
@@ -248,7 +280,7 @@ class UpdateWindow(Backdrop):
                 subprocess.Popen([str(exe), "--server"], creationflags=flags, close_fds=True)
             subprocess.Popen([str(exe), "--background"], creationflags=flags, close_fds=True)
         if error:
-            self.status.setText(f"Aggiornamento non riuscito: {error}\nPuoi scaricare Ressy da ressy.top.")
+            self.status.setText(tr("Aggiornamento non riuscito: {error}\nPuoi scaricare Ressy da ressy.top.").format(error=error))
             self.close_button.show()
             return
         from PySide6.QtCore import QTimer
@@ -278,15 +310,15 @@ class Installer(QObject):
         folder: Path = plan["folder"]
         exe = folder / install.APP_EXE
 
-        self.step.emit("Chiudo Ressy, se è aperta…", 5)
+        self.step.emit(tr("Chiudo Ressy, se è aperta…"), 5)
         install.ask_app_to_quit()
         install.stop_server()
         if not install.wait_unlocked(folder, 15):
-            raise RuntimeError("Ressy.exe è ancora in uso: chiudi Ressy e riprova.")
+            raise RuntimeError(tr("Ressy.exe è ancora in uso: chiudi Ressy e riprova."))
 
-        copy_payload(folder, lambda pct: self.step.emit("Copio i file…", 15 + int(60 * pct)))
+        copy_payload(folder, lambda pct: self.step.emit(tr("Copio i file…"), 15 + int(60 * pct)))
 
-        self.step.emit("Salvo le impostazioni…", 78)
+        self.step.emit(tr("Salvo le impostazioni…"), 78)
         if plan["server"]:
             cfg = install.ServerConfig.load()
             cfg.telegram_token = plan["server_tokens"]["telegram_token"]
@@ -296,23 +328,25 @@ class Installer(QObject):
         if plan["app"]:
             settings = Settings.load()
             settings.ensure_identity()
-            for key, value in {**plan["remote"], **plan["brain"], **plan["speech"]}.items():
+            for key, value in {**plan["remote"], **plan["brain"], **plan["speech"], **plan["language"]}.items():
                 setattr(settings, key, value)
             settings._sanitize()
             settings.save()
 
-        self.step.emit("Creo i collegamenti…", 85)
+        self.step.emit(tr("Creo i collegamenti…"), 85)
         menu = install.start_menu_dir()
+        for old in menu.glob("*.lnk"):
+            old.unlink(missing_ok=True)
         if plan["app"]:
-            install.create_shortcut(menu / "Ressy.lnk", exe, "", "Ressy, l'assistente vocale")
+            install.create_shortcut(menu / "Ressy.lnk", exe, "", tr("Ressy, l'assistente vocale"))
             if plan["desktop"]:
-                install.create_shortcut(install.desktop_dir() / "Ressy.lnk", exe, "", "Ressy, l'assistente vocale")
+                install.create_shortcut(install.desktop_dir() / "Ressy.lnk", exe, "", tr("Ressy, l'assistente vocale"))
         if plan["server"]:
-            install.create_shortcut(menu / "Ressy Server.lnk", exe, "--server", "Il server del tuo bot")
-            install.create_shortcut(menu / "Ferma Ressy Server.lnk", exe, "--server-stop", "Ferma il server del bot")
-        install.create_shortcut(menu / "Disinstalla Ressy.lnk", exe, "--uninstall", "Disinstalla Ressy")
+            install.create_shortcut(menu / tr("Ressy Server.lnk"), exe, "--server", tr("Il server del tuo bot"))
+            install.create_shortcut(menu / tr("Ferma Ressy Server.lnk"), exe, "--server-stop", tr("Ferma il server del bot"))
+        install.create_shortcut(menu / tr("Disinstalla Ressy.lnk"), exe, "--uninstall", tr("Disinstalla Ressy"))
 
-        self.step.emit("Avvio con Windows…", 92)
+        self.step.emit(tr("Avvio con Windows…"), 92)
         quoted = subprocess.list2cmdline([str(exe)])
         install.set_run(install.RUN_APP, f"{quoted} --background" if plan["app"] and plan["autostart"] else None)
         install.set_run(install.RUN_SERVER, f"{quoted} --server" if plan["server"] else None)
@@ -325,31 +359,31 @@ class Installer(QObject):
             from ressy.speech import local_stt
 
             mb = local_stt.size_mb(model)
-            self.step.emit(f"Scarico il modello vocale ({mb} MB)…", 86)
+            self.step.emit(tr("Scarico il modello vocale ({mb} MB)…").format(mb=mb), 86)
             try:
                 local_stt.download_model(model, lambda done, total: self.step.emit(
-                    f"Scarico il modello vocale… {done / 1e6:.0f} di {total / 1e6:.0f} MB",
+                    tr("Scarico il modello vocale… {value:.0f} di {value2:.0f} MB").format(value=done / 1e6, value2=total / 1e6),
                     86 + int(13 * done / max(1, total))))
             except Exception as exc:
                 traceback.print_exc()
-                self.warning = f"Il modello vocale non si è scaricato ({exc}): Ressy te lo riproporrà nelle impostazioni."
-        self.step.emit("Fatto.", 100)
+                self.warning = tr("Il modello vocale non si è scaricato ({exc}): Ressy te lo riproporrà nelle impostazioni.").format(exc=exc)
+        self.step.emit(tr("Fatto."), 100)
 
 
 class Setup(Backdrop):
     PAGE_NAMES = {
-        "welcome": "Installa",
-        "brain": "Intelligenza",
-        "voice": "Voce",
-        "trial": "Prova",
-        "remote": "Telegram e Discord",
-        "progress": "Installazione",
-        "done": "Fatto",
+        "welcome": tr("Installa"),
+        "brain": tr("Intelligenza"),
+        "voice": tr("Voce"),
+        "trial": tr("Prova"),
+        "remote": tr("Telegram e Discord"),
+        "progress": tr("Installazione"),
+        "done": tr("Fatto"),
     }
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Installa Ressy")
+        self.setWindowTitle(tr("Installa Ressy"))
         self.setWindowIcon(logo.app_icon())
         self.setMinimumSize(QSize(940, 700))
         self.settings = Settings.load()
@@ -369,7 +403,7 @@ class Setup(Backdrop):
         left.addLayout(head)
         self.rail = StepRail()
         left.addWidget(self.rail, 1)
-        left.addWidget(hint("Software libero, licenza MIT.<br>Si installa solo per il tuo utente."))
+        left.addWidget(hint(tr("Software libero, licenza MIT.<br>Si installa solo per il tuo utente.")))
         root.addLayout(left)
 
         right = QVBoxLayout()
@@ -382,8 +416,8 @@ class Setup(Backdrop):
         self.error.hide()
         right.addWidget(self.error)
         nav = QHBoxLayout()
-        self.back = QPushButton("Indietro")
-        self.next = QPushButton("Avanti")
+        self.back = QPushButton(tr("Indietro"))
+        self.next = QPushButton(tr("Avanti"))
         self.next.setObjectName("primary")
         self.next.setMinimumWidth(130)
         self.back.clicked.connect(self._back)
@@ -436,34 +470,43 @@ class Setup(Backdrop):
 
     def _build_welcome(self) -> None:
         page, v = self._page(
-            "Installa Ressy",
-            "L'assistente vocale per Windows: tieni premuto K e di' «Ressy, sveglia!». "
-            "Si installa solo per il tuo utente, senza permessi da amministratore.",
+            tr("Installa Ressy"),
+            tr("L'assistente vocale per Windows: tieni premuto K e di' «Ressy, sveglia!». "
+            "Si installa solo per il tuo utente, senza permessi da amministratore."),
         )
-        v.addWidget(section("Cosa installare"))
-        self.want_app = QCheckBox("Ressy, l'assistente vocale")
+        v.addWidget(section("Lingua · Language"))
+        self.language_box = QComboBox()
+        for code, name in LANGUAGES.items():
+            self.language_box.addItem(name, code)
+        self.language_box.setCurrentIndex(max(0, self.language_box.findData(i18n.language())))
+        self.language_box.setFixedWidth(220)
+        self.language_box.currentIndexChanged.connect(self._switch_language)
+        v.addWidget(self.language_box)
+        v.addSpacing(6)
+        v.addWidget(section(tr("Cosa installare")))
+        self.want_app = QCheckBox(tr("Ressy, l'assistente vocale"))
         self.want_app.setChecked(True)
         v.addWidget(self.want_app)
-        self.want_server = QCheckBox("Ressy Server (self-host), per un PC sempre acceso")
+        self.want_server = QCheckBox(tr("Ressy Server (self-host), per un PC sempre acceso"))
         v.addWidget(self.want_server)
         server_hint = hint(
-            "Fa girare il tuo bot Telegram/Discord giorno e notte per i tuoi PC e ti avvisa quando uno va "
-            "offline. Non serve se vuoi che il bot giri dentro Ressy su questo PC."
+            tr("Fa girare il tuo bot Telegram/Discord giorno e notte per i tuoi PC e ti avvisa quando uno va "
+            "offline. Non serve se vuoi che il bot giri dentro Ressy su questo PC.")
         )
         server_hint.setContentsMargins(28, 0, 0, 0)
         v.addWidget(server_hint)
         v.addSpacing(6)
-        v.addWidget(section("Dove"))
+        v.addWidget(section(tr("Dove")))
         row = QHBoxLayout()
         self.folder = QLineEdit(str(install.installed_dir() or install.default_install_dir()))
-        browse = QPushButton("Sfoglia…")
+        browse = QPushButton(tr("Sfoglia…"))
         browse.clicked.connect(self._browse)
         row.addWidget(self.folder, 1)
         row.addWidget(browse)
         v.addLayout(row)
-        self.desktop = QCheckBox("Collegamento sul desktop")
+        self.desktop = QCheckBox(tr("Collegamento sul desktop"))
         self.desktop.setChecked(True)
-        self.autostart = QCheckBox("Avvia Ressy con Windows")
+        self.autostart = QCheckBox(tr("Avvia Ressy con Windows"))
         self.autostart.setChecked(True)
         v.addWidget(self.desktop)
         v.addWidget(self.autostart)
@@ -473,17 +516,23 @@ class Setup(Backdrop):
         v.addStretch(1)
         self._add("welcome", page)
 
+    def _switch_language(self) -> None:
+        code = self.language_box.currentData()
+        if code and code != i18n.language():
+            self.setCursor(Qt.CursorShape.WaitCursor)
+            relaunch_in(code)
+
     def _browse(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(self, "Cartella di Ressy", self.folder.text())
+        chosen = QFileDialog.getExistingDirectory(self, tr("Cartella di Ressy"), self.folder.text())
         if chosen:
             path = Path(chosen)
             self.folder.setText(str(path if path.name.lower() == "ressy" else path / "Ressy"))
 
     def _build_brain(self) -> None:
         page, v = self._page(
-            "L'intelligenza di Ressy",
-            "Chi capisce cosa chiedi e decide cosa fare sul PC. Ognuno usa la propria chiave API: "
-            "crearla è gratis e richiede un minuto.",
+            tr("L'intelligenza di Ressy"),
+            tr("Chi capisce cosa chiedi e decide cosa fare sul PC. Ognuno usa la propria chiave API: "
+            "crearla è gratis e richiede un minuto."),
         )
         self.brain = BrainSetup(auto_verify=True)
         self.brain.validity.connect(lambda _: self._refresh_next())
@@ -502,9 +551,9 @@ class Setup(Backdrop):
 
     def _build_voice(self) -> None:
         page, v = self._page(
-            "Come ti ascolta",
-            "Per capire la tua voce Ressy può usare un piccolo modello sul PC, gratis e senza limiti, "
-            "oppure un servizio online con la tua chiave.",
+            tr("Come ti ascolta"),
+            tr("Per capire la tua voce Ressy può usare un piccolo modello sul PC, gratis e senza limiti, "
+            "oppure un servizio online con la tua chiave."),
         )
         self.speech = SpeechSetup(download_now=True)
         self.speech.readiness.connect(lambda _: self._refresh_next())
@@ -516,9 +565,9 @@ class Setup(Backdrop):
 
     def _build_trial(self) -> None:
         page, v = self._page(
-            "Proviamo",
-            "Tre prove vere con il tuo microfono, prima di finire: Ressy deve sentirti e capirti. "
-            "Avanti si sblocca quando sono riuscite tutte e tre.",
+            tr("Proviamo"),
+            tr("Tre prove vere con il tuo microfono, prima di finire: Ressy deve sentirti e capirti. "
+            "Avanti si sblocca quando sono riuscite tutte e tre."),
         )
         self.trial = VoiceTrial()
         self.trial.completed.connect(lambda _: self._refresh_next())
@@ -527,13 +576,20 @@ class Setup(Backdrop):
         self._add("trial", page)
 
     def _trial_settings(self):
-        return settings_for_trial(self.settings, {**self.brain.values(), **self.speech.values()})
+        return settings_for_trial(
+            self.settings, {**self.brain.values(), **self.speech.values(), **self._language_values()}
+        )
+
+    def _language_values(self) -> dict:
+        code, s = i18n.language(), self.settings
+        phrases = s.wake_phrases if code == s.language else wake_phrases_for(code, s.wake_phrases)
+        return {"language": code, "tts_voice": voice_for(code, s.tts_voice), "wake_phrases": phrases}
 
     def _build_remote(self) -> None:
         page, v = self._page(
-            "Telegram e Discord",
-            "Nessun bot condiviso: ognuno usa il proprio, così nessuno si pesta i piedi. "
-            "Puoi cambiare idea quando vuoi nelle impostazioni di Ressy.",
+            tr("Telegram e Discord"),
+            tr("Nessun bot condiviso: ognuno usa il proprio, così nessuno si pesta i piedi. "
+            "Puoi cambiare idea quando vuoi nelle impostazioni di Ressy."),
         )
         self.bot_setup = BotSetup()
         v.addWidget(self.bot_setup)
@@ -542,8 +598,8 @@ class Setup(Backdrop):
         s = QVBoxLayout(self.server_box)
         s.setContentsMargins(0, 0, 0, 0)
         s.setSpacing(10)
-        s.addWidget(section("Ressy Server"))
-        s.addWidget(hint("Il bot del server: i tuoi PC si collegano a lui."))
+        s.addWidget(section(tr("Ressy Server")))
+        s.addWidget(hint(tr("Il bot del server: i tuoi PC si collegano a lui.")))
         self.server_tokens = TokenFields()
         s.addWidget(self.server_tokens)
         form = QFormLayout()
@@ -552,10 +608,10 @@ class Setup(Backdrop):
         self.port.setRange(1024, 65535)
         self.port.setValue(install.ServerConfig.load().port)
         self.port.setMaximumWidth(140)
-        form.addRow("Porta", self.port)
+        form.addRow(tr("Porta"), self.port)
         s.addLayout(form)
         s.addWidget(hint(TOKEN_HELP))
-        self.app_note = hint("Ressy su questo PC si collegherà da sola a questo server.")
+        self.app_note = hint(tr("Ressy su questo PC si collegherà da sola a questo server."))
         s.addWidget(self.app_note)
         v.addWidget(self.server_box)
         v.addStretch(1)
@@ -579,7 +635,7 @@ class Setup(Backdrop):
         self.app_note.setVisible(app)
 
     def _build_progress(self) -> None:
-        page, v = self._page("Installo…", "")
+        page, v = self._page(tr("Installo…"), "")
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setTextVisible(False)
@@ -592,10 +648,10 @@ class Setup(Backdrop):
         self._add("progress", page)
 
     def _build_done(self) -> None:
-        page, v = self._page("Ressy è installata", "")
+        page, v = self._page(tr("Ressy è installata"), "")
         self.done_text = hint("")
         v.addWidget(self.done_text)
-        self.launch = QCheckBox("Avvia Ressy ora")
+        self.launch = QCheckBox(tr("Avvia Ressy ora"))
         self.launch.setChecked(True)
         v.addWidget(self.launch)
         v.addStretch(1)
@@ -653,7 +709,7 @@ class Setup(Backdrop):
                 self.trial.start(self._trial_settings())
         self._refresh_next()
         following = steps[steps.index(key) + 1] if key != "done" else ""
-        self.next.setText("Fine" if key == "done" else ("Installa" if following == "progress" else "Avanti"))
+        self.next.setText(tr("Fine") if key == "done" else (tr("Installa") if following == "progress" else tr("Avanti")))
         self._update_rail()
 
     def _fail(self, text: str) -> None:
@@ -668,9 +724,9 @@ class Setup(Backdrop):
         key = self.current
         if key == "welcome":
             if not (self.want_app.isChecked() or self.want_server.isChecked()):
-                return self._fail("Scegli almeno una cosa da installare.")
+                return self._fail(tr("Scegli almeno una cosa da installare."))
             if not self.folder.text().strip():
-                return self._fail("Scegli una cartella.")
+                return self._fail(tr("Scegli una cartella."))
             self._prepare_remote()
         elif key == "brain":
             problem = self.brain.problem()
@@ -704,9 +760,10 @@ class Setup(Backdrop):
             "folder": Path(self.folder.text().strip()),
             "desktop": self.desktop.isChecked(), "autostart": self.autostart.isChecked(),
             "port": int(self.port.value()), "remote": {}, "server_tokens": {},
-            "brain": {}, "speech": {}, "download": "",
+            "brain": {}, "speech": {}, "download": "", "language": {},
         }
         if app:
+            plan["language"] = self._language_values()
             plan["brain"] = self.brain.values()
             plan["speech"] = {**self.speech.values(), "mic_device": self.trial.mic_device}
             if self.speech.needs_download():
@@ -714,7 +771,7 @@ class Setup(Backdrop):
         if server:
             tokens = self.server_tokens.values()
             if not tokens["telegram_token"] and not tokens["discord_token"]:
-                return "Incolla il token del bot per il server."
+                return tr("Incolla il token del bot per il server.")
             problem = check_token("telegram", tokens["telegram_token"]) or check_token("discord", tokens["discord_token"])
             if problem:
                 return problem
@@ -744,36 +801,32 @@ class Setup(Backdrop):
     def _installed(self, error: str) -> None:
         if error:
             self._show("remote")
-            self._fail(f"Installazione non riuscita: {error}")
+            self._fail(tr("Installazione non riuscita: {error}").format(error=error))
             return
         plan = self.plan
-        lines = [f"Ressy è in <b>{plan['folder']}</b>. La trovi nel menu Start; si disinstalla da "
-                 "Impostazioni › App, come ogni altro programma."]
+        lines = [tr("Ressy è in <b>{value}</b>. La trovi nel menu Start; si disinstalla da Impostazioni › App, come ogni altro programma.").format(value=plan['folder'])]
         if plan["app"]:
             from ressy.config import PROVIDER_NAMES
 
             brain = PROVIDER_NAMES.get(plan["brain"].get("llm_provider", ""), "")
             engine = plan["speech"].get("stt_engine", "")
-            ear = "il modello sul PC" if engine == "local" else PROVIDER_NAMES.get(engine, "")
-            lines.append(f"Ressy pensa con <b>{brain}</b> e ti ascolta con <b>{ear}</b>. "
-                         "Tieni premuto K e di' «Ressy, sveglia!».")
+            ear = tr("il modello sul PC") if engine == "local" else PROVIDER_NAMES.get(engine, "")
+            lines.append(tr("Ressy pensa con <b>{brain}</b> e ti ascolta con <b>{ear}</b>. Tieni premuto K e di' «Ressy, sveglia!».").format(brain=brain, ear=ear))
             if plan["remote"].get("remote_mode") == "local" and plan["remote"].get("remote_enabled"):
-                lines.append("Per comandarla dal telefono: icona di Ressy › «Collega Telegram o Discord…» e "
-                             "scrivi il codice al tuo bot.")
+                lines.append(tr("Per comandarla dal telefono: icona di Ressy › «Collega Telegram o Discord…» e "
+                             "scrivi il codice al tuo bot."))
         if self.worker.warning:
             lines.append(f"<span style='color:#FF8C73'>{self.worker.warning}</span>")
         if plan["server"]:
             ips = install.lan_addresses()
             where = ", ".join(f"<code>ws://{ip}:{plan['port']}/ws/agent</code>" for ip in ips) or \
-                f"<code>ws://IP-di-questo-PC:{plan['port']}/ws/agent</code>"
+                tr("<code>ws://IP-di-questo-PC:{value}/ws/agent</code>").format(value=plan['port'])
             lines.append(
-                "Ressy Server parte con Windows. Sugli altri PC, in Ressy › Impostazioni › Da remoto, scegli "
-                f"«Il tuo server» e scrivi {where}. Se Windows chiede di consentire l'accesso alla rete, "
-                "consenti le reti private."
+                tr("Ressy Server parte con Windows. Sugli altri PC, in Ressy › Impostazioni › Da remoto, scegli «Il tuo server» e scrivi {where}. Se Windows chiede di consentire l'accesso alla rete, consenti le reti private.").format(where=where)
             )
         self.done_text.setText("<br><br>".join(lines))
         self.launch.setVisible(plan["app"] or plan["server"])
-        self.launch.setText("Avvia Ressy ora" if plan["app"] else "Avvia Ressy Server ora")
+        self.launch.setText(tr("Avvia Ressy ora") if plan["app"] else tr("Avvia Ressy Server ora"))
         self._show("done")
 
     def _finish(self) -> None:
@@ -795,7 +848,7 @@ def main() -> int:
     if not payload_path().exists():
         from PySide6.QtWidgets import QMessageBox
 
-        QMessageBox.critical(None, "Ressy", "Il pacchetto di installazione è danneggiato: scaricalo di nuovo.")
+        QMessageBox.critical(None, "Ressy", tr("Il pacchetto di installazione è danneggiato: scaricalo di nuovo."))
         return 1
     folder = install.installed_dir() if UPDATE else None
     if UPDATE and folder is not None and (folder / install.APP_EXE).exists():
