@@ -271,6 +271,10 @@ def match(text: str) -> Quick | None:
     if math_ans:
         return Quick(answer=math_ans)
 
+    if re.fullmatch(r"(?:edita|monta|modifica)\s+(?:un\s+|il\s+)?video(?:\s+(?:con|su)\s+(capcut|davinci(?:\s+resolve)?))?|edit\s+a?\s*video", t_no_colon):
+        ed = "davinci" if "davinci" in t_no_colon else ("capcut" if "capcut" in t_no_colon else "auto")
+        return Quick("edit_video", {"editor": ed})
+
     wifi_call = re.fullmatch(
         r"(?:chiamami|fammi una chiamata|fai una chiamata|chiama)(?:\s+in|\s+su|\s+sul)?\s+wi-?fi(?:\s+(?:a|su|verso)\s+(.+?))?(?:\s+(?:per|riguardo)\s+(.+))?",
         t_no_colon,

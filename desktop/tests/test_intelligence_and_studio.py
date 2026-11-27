@@ -815,6 +815,16 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     wifi_ok = calls.call_phone(ctx, {"platform": "wifi", "recipient": "iPhone-Marco"})
     assert "iPhone-Marco" in wifi_ok and "http://" in wifi_ok
 
+    salvaged = local_llm.parse_reply(
+        '{"azione": "edit_video", "argomenti": {"editor": "capcut", "files": ["downloaded_video.mp4"], "style":',
+        {"edit_video"},
+        "s1",
+    )
+    assert salvaged.get("tool_calls") and salvaged["tool_calls"][0]["function"]["name"] == "edit_video"
+    bad_json = local_llm.parse_reply('{"azione": "unknown", "risposta": "ciao', {"open_app"}, "s2")
+    assert bad_json["content"] == "ciao"
+    assert quick.match("edita un video") == quick.Quick("edit_video", {"editor": "auto"})
+
     rem_svc = reminders.ReminderService(tmp_path / "rem.json", lambda *_a: None)
 
     async def _add_rem():

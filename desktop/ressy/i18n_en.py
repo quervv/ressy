@@ -2153,4 +2153,6 @@ EN: dict[str, str] = {
         'I cannot find the device «{target}» on the Wi-Fi network.',
     'Chiamata Wi-Fi avviata verso {device}! Apri sul dispositivo: {url}':
         'Wi-Fi call started to {device}! Open on the device: {url}',
+    'Non sono riuscita a completare la risposta, riprova.':
+        'I could not finish the answer, please try again.',
 }

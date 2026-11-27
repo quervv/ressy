@@ -433,15 +433,41 @@ _CLAIMS_DONE = re.compile(r"^\s*(fatto|ho (?:aperto|avviato|scritto|mandato|invi
                           re.I)
 
 
+_PLACEHOLDER_VIDEOS = frozenset({"downloaded_video.mp4", "video.mp4", "input.mp4", "example.mp4", "sample.mp4", "clip.mp4"})
+
+
 def parse_reply(raw: str, allowed: set[str], step_id: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    data: Any = None
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
     except ValueError:
-        return {"role": "assistant", "content": raw.strip()}
+        if text.startswith("{"):
+            m_act = re.search(r'"azione"\s*:\s*"([^"]+)"', text)
+            if m_act and m_act.group(1) in allowed:
+                act = m_act.group(1)
+                args_salvaged: dict[str, Any] = {}
+                m_ed = re.search(r'"editor"\s*:\s*"([^"]+)"', text)
+                if m_ed and act == "edit_video":
+                    args_salvaged["editor"] = m_ed.group(1)
+                data = {"azione": act, "argomenti": args_salvaged, "risposta": ""}
+            else:
+                m_rep = re.search(r'"risposta"\s*:\s*"((?:[^"\\]|\\.)*)', text)
+                if m_rep and m_rep.group(1).strip():
+                    return {"role": "assistant", "content": m_rep.group(1).replace('\\"', '"').strip()}
+                return {"role": "assistant", "content": tr("Non sono riuscita a completare la risposta, riprova.")}
+        else:
+            return {"role": "assistant", "content": text}
     if not isinstance(data, dict):
         return {"role": "assistant", "content": str(data)}
     action = str(data.get("azione") or "rispondi")
     args = data.get("argomenti") if isinstance(data.get("argomenti"), dict) else {}
+    if action == "edit_video" and isinstance(args.get("files"), list):
+        kept = [f for f in args["files"] if str(f).strip().lower() not in _PLACEHOLDER_VIDEOS or Path(str(f)).exists()]
+        if kept:
+            args["files"] = kept
+        else:
+            args.pop("files", None)
     reply = str(data.get("risposta") or "").strip()
     if action == "rispondi" or action not in allowed:
         return {"role": "assistant", "content": reply}
