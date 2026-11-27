@@ -276,10 +276,15 @@ class UpdateWindow(Backdrop):
 
     def _done(self, error: str) -> None:
         if install.runtime_exe(self.folder).exists():
-            flags = install.DETACHED_PROCESS
+            flags = install.DETACHED_PROCESS | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("_MEI")}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            mei = getattr(sys, "_MEIPASS", "")
+            if mei and "PATH" in env:
+                env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep) if not p.startswith(mei))
             if self.worker.server_was_running:
-                subprocess.Popen(install.runtime_cmd(self.folder, "--server"), creationflags=flags, close_fds=True)
-            subprocess.Popen(install.runtime_cmd(self.folder, "--background"), creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(self.folder, "--server"), cwd=str(self.folder), env=env, creationflags=flags, close_fds=True)
+            subprocess.Popen(install.runtime_cmd(self.folder, "--background"), cwd=str(self.folder), env=env, creationflags=flags, close_fds=True)
         if error:
             self.status.setText(tr("Aggiornamento non riuscito: {error}\nPuoi scaricare Ressy da ressy.top.").format(error=error))
             self.close_button.show()
@@ -838,11 +843,16 @@ class Setup(Backdrop):
     def _finish(self) -> None:
         if self.launch.isChecked():
             folder = self.plan["folder"]
-            flags = install.DETACHED_PROCESS
+            flags = install.DETACHED_PROCESS | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("_MEI")}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            mei = getattr(sys, "_MEIPASS", "")
+            if mei and "PATH" in env:
+                env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep) if not p.startswith(mei))
             if self.plan["server"]:
-                subprocess.Popen(install.runtime_cmd(folder, "--server"), creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(folder, "--server"), cwd=str(folder), env=env, creationflags=flags, close_fds=True)
             if self.plan["app"]:
-                subprocess.Popen(install.runtime_cmd(folder), creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(folder), cwd=str(folder), env=env, creationflags=flags, close_fds=True)
         QApplication.quit()
 
 

@@ -117,4 +117,4 @@ def download(release: Release, progress: Progress | None = None, cancel: threadi
 def install(setup: Path) -> None:
     from .install import DETACHED_PROCESS
 
-    subprocess.Popen([str(setup), "--update"], creationflags=DETACHED_PROCESS, close_fds=True)
+    subprocess.Popen([str(setup), "--update"], cwd=str(setup.parent), creationflags=DETACHED_PROCESS, close_fds=True)
