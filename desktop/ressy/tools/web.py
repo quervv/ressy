@@ -4,6 +4,7 @@ import html as html_lib
 import ipaddress
 import json
 import logging
+import os
 import re
 import socket
 import urllib.parse
@@ -11,7 +12,7 @@ import webbrowser
 
 import httpx
 
-from .registry import Tool, ToolContext, ToolError, params
+from .registry import NeedsInputError, Tool, ToolContext, ToolError, params
 from ..i18n import language, tr
 
 log = logging.getLogger("ressy.web")
@@ -279,15 +280,43 @@ def compose_email(ctx: ToolContext, args: dict) -> str:
     to = (args.get("to") or "").strip()
     subject = (args.get("subject") or "").strip()
     body = (args.get("body") or "").strip()
-    params_q = {}
-    if subject:
-        params_q["subject"] = subject
-    if body:
-        params_q["body"] = body
-    query = urllib.parse.urlencode(params_q, quote_via=urllib.parse.quote)
-    uri = f"mailto:{urllib.parse.quote(to)}" + (f"?{query}" if query else "")
-    _open(uri)
-    return tr("Ho preparato la bozza email{to}.").format(to=tr(" per {to}").format(to=to) if to else "")
+
+    if not to or "@" not in to:
+        raise NeedsInputError(tr("A quale indirizzo email devo scrivere?"))
+    if not subject and not body:
+        raise NeedsInputError(tr("Qual è l'oggetto e il testo dell'email per {to}?").format(to=to))
+    if not subject:
+        raise NeedsInputError(tr("Qual è l'oggetto dell'email per {to}?").format(to=to))
+    if not body:
+        raise NeedsInputError(tr("Cosa devo scrivere nel testo dell'email per {to}?").format(to=to))
+
+    smtp_user = os.environ.get("RESSY_SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("RESSY_SMTP_PASS", "").strip()
+    if smtp_user and smtp_pass:
+        import smtplib
+        from email.message import EmailMessage
+
+        host = os.environ.get("RESSY_SMTP_HOST", "smtp.gmail.com").strip()
+        port = int(os.environ.get("RESSY_SMTP_PORT", "465"))
+        msg = EmailMessage()
+        msg["From"] = smtp_user
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.set_content(body)
+        with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
+            smtp.login(smtp_user, smtp_pass)
+            smtp.send_message(msg)
+        return tr("Email inviata a {to} (oggetto: {subject}).").format(to=to, subject=subject)
+
+    if str(args.get("client") or "").lower() == "mailto":
+        query = urllib.parse.urlencode({"subject": subject, "body": body}, quote_via=urllib.parse.quote)
+        _open(f"mailto:{urllib.parse.quote(to)}?{query}")
+    else:
+        query = urllib.parse.urlencode({"view": "cm", "fs": "1", "to": to, "su": subject, "body": body})
+        _open(f"https://mail.google.com/mail/?{query}")
+    return tr("Ho aperto l'email pronta per {to} con oggetto «{subject}»: controllala e premi Invia.").format(
+        to=to, subject=subject
+    )
 
 
 TOOLS = [
@@ -321,7 +350,7 @@ TOOLS = [
     ),
     Tool(
         "compose_email",
-        "Apre bozza email nel client di posta.",
+        "Invia o prepara un'email (to, subject, body): se manca destinatario, oggetto o testo lo chiede all'utente.",
         params({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}),
         compose_email,
     ),

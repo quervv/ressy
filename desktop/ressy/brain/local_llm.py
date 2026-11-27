@@ -98,9 +98,9 @@ LOCAL_TOOLS = (
     "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer", "wait",
 )
 LOCAL_TOOLS_FULL = LOCAL_TOOLS + (
-    "call_phone", "send_discord_message", "read_discord_chat", "write_in_app",
+    "call_phone", "send_telegram_message", "send_discord_message", "read_discord_chat", "write_in_app",
     "create_file", "read_file", "list_folder", "file_action", "find_files",
-    "edit_video", "download_file", "run_python",
+    "record_video", "edit_video", "download_file", "run_python",
     "read_screen", "click_text", "window_action", "mouse_action", "clipboard",
     "notes", "timer", "system_control", "read_webpage", "compose_email", "run_powershell",
 )

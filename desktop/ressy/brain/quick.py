@@ -274,6 +274,18 @@ def match(text: str) -> Quick | None:
     if re.fullmatch(r"(?:edita|monta|modifica)\s+(?:un\s+|il\s+)?video(?:\s+(?:con|su)\s+(capcut|davinci(?:\s+resolve)?))?|edit\s+a?\s*video", t_no_colon):
         ed = "davinci" if "davinci" in t_no_colon else ("capcut" if "capcut" in t_no_colon else "auto")
         return Quick("edit_video", {"editor": ed})
+    if re.fullmatch(r"(?:ferma|stoppa|stop|termina)\s+(?:la\s+)?registrazione(?:\s+video)?", t_no_colon):
+        return Quick("record_video", {"action": "stop", "auto_edit": True})
+    if re.fullmatch(r"(?:registra|avvia\s+(?:la\s+)?registrazione(?:\s+di)?)\s+(?:un\s+video|lo\s+schermo|schermo|la\s+webcam|webcam)", t_no_colon):
+        src = "camera" if "webcam" in t_no_colon else "screen"
+        return Quick("record_video", {"action": "start", "source": src, "auto_edit": True})
+
+    tg_msg = re.fullmatch(
+        r"(?:su telegram\s+)?(?:scrivi|manda|invia)(?:\s+su telegram)?(?:\s+un messaggio)?(?:\s+su telegram)?\s+a\s+([^\s:]{1,40})\s*:?\s+(.+)",
+        t,
+    )
+    if tg_msg and "telegram" in t:
+        return Quick("send_telegram_message", {"recipient": _preserve_case(raw, tg_msg.group(1)), "message": _as_said(raw, tg_msg.group(2))})
 
     wifi_call = re.fullmatch(
         r"(?:chiamami|fammi una chiamata|fai una chiamata|chiama)(?:\s+in|\s+su|\s+sul)?\s+wi-?fi(?:\s+(?:a|su|verso)\s+(.+?))?(?:\s+(?:per|riguardo)\s+(.+))?",

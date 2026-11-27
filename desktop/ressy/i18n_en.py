@@ -2161,4 +2161,58 @@ EN: dict[str, str] = {
         'I also sent the notification with the link to your phone.',
     'Ti ho inviato una chiamata vocale/notifica urgente su {plat}!':
         'I sent an urgent voice call/notification on {plat}!',
+    'Scrivo su Telegram…':
+        'Writing on Telegram…',
+    'A chi devo scrivere su Telegram?':
+        'Who should I write to on Telegram?',
+    'Telegram ha perso il focus: messaggio NON inviato.':
+        'Telegram lost focus: message NOT sent.',
+    'Telegram ha perso il focus mentre scrivevo: controlla la chat.':
+        'Telegram lost focus while typing: check the chat.',
+    'Messaggio inviato su Telegram a {target}.':
+        'Message sent on Telegram to {target}.',
+    'A quale indirizzo email devo scrivere?':
+        'Which email address should I write to?',
+    'Qual è l\'oggetto e il testo dell\'email per {to}?':
+        'What are the subject and body of the email to {to}?',
+    'Qual è l\'oggetto dell\'email per {to}?':
+        'What is the subject of the email to {to}?',
+    'Cosa devo scrivere nel testo dell\'email per {to}?':
+        'What should I write in the email body to {to}?',
+    'Email inviata a {to} (oggetto: {subject}).':
+        'Email sent to {to} (subject: {subject}).',
+    'Ho aperto l\'email pronta per {to} con oggetto «{subject}»: controllala e premi Invia.':
+        'I opened the email ready for {to} with subject «{subject}»: review it and press Send.',
+    'FFmpeg non è disponibile per registrare video.':
+        'FFmpeg is not available to record video.',
+    'Sto registrando ({source}) in {path}.':
+        'Recording ({source}) to {path}.',
+    'Nessuna registrazione video attiva al momento.':
+        'No video recording is currently active.',
+    'Non c\'è nessuna registrazione video da fermare.':
+        'There is no active video recording to stop.',
+    'La registrazione non ha prodotto un file video valido.':
+        'The recording did not produce a valid video file.',
+    'Registrazione salvata in {file}.\n{edit}':
+        'Recording saved to {file}.\n{edit}',
+    'Registrazione video salvata in {path}.':
+        'Video recording saved to {path}.',
+    'Sto già registrando un video: di\' «ferma registrazione» prima di iniziarne un\'altra.':
+        'I am already recording a video: say «stop recording» before starting another one.',
+    'Non trovo nessuna webcam collegata su questo PC.':
+        'I cannot find any connected webcam on this PC.',
+    'Registrazione video non riuscita.':
+        'Video recording failed.',
+    'Video registrato ({secs}s) in {file}.\n{edit}':
+        'Video recorded ({secs}s) in {file}.\n{edit}',
+    'Video registrato in {path}.':
+        'Video recorded to {path}.',
+    'Registrazione avviata ({source})! Dimmi «ferma registrazione» quando hai finito: poi lo edito subito su CapCut con sottotitoli e asset.':
+        'Recording started ({source})! Say «stop recording» when done: then I will edit it in CapCut with subtitles and assets.',
+    'webcam':
+        'webcam',
+    'schermo':
+        'screen',
+    'Registro il video…':
+        'Recording video…',
 }

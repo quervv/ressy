@@ -816,6 +816,45 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     assert "POCO-X6-5G" in wifi_ok and "http://" in wifi_ok
     wifi_fuzzy = asyncio.run(calls.call_phone(ctx, {"platform": "wifi", "recipient": "poco xz 5g"}))
     assert "POCO-X6-5G" in wifi_fuzzy and "http://" in wifi_fuzzy
+    wifi_spoken = asyncio.run(calls.call_phone(ctx, {"platform": "wifi", "recipient": "poco trattino altro x6 5G"}))
+    assert "POCO-X6-5G" in wifi_spoken and "http://" in wifi_spoken
+    wifi_ip = asyncio.run(calls.call_phone(ctx, {"platform": "wifi", "recipient": "POCO-X6-5G 192.168.1.3"}))
+    assert "POCO-X6-5G" in wifi_ip and "http://" in wifi_ip
+
+    notified: list[dict] = []
+
+    class FakeRemote:
+        links = [{"platform": "telegram", "user_id": "123"}]
+
+        async def notify(self, text, *, voice=None, images=None, target=None):
+            import json as _json
+            _json.dumps({"text": text, "voice": voice, "target": target})
+            notified.append({"text": text, "voice": voice, "target": target})
+            return True
+
+    class FakeSpeaker:
+        async def voice_note(self, _text):
+            return (b"OggSdemo", "audio/ogg")
+
+    ctx_remote = ToolContext(channel=VOICE, services=SimpleNamespace(settings=settings, remote=FakeRemote(), speaker=FakeSpeaker()))
+    res_remote = asyncio.run(calls.call_phone(ctx_remote, {"platform": "telegram", "reason": "Appuntamento 17:00"}))
+    assert "Telegram" in res_remote and notified and isinstance(notified[0]["voice"]["data"], str)
+    assert quick.match("scrivi su telegram a Marco arrivo subito") == quick.Quick("send_telegram_message", {"recipient": "Marco", "message": "arrivo subito"})
+
+    from ressy.tools.registry import NeedsInputError
+    with pytest.raises(NeedsInputError):
+        web.compose_email(ctx, {"to": "", "subject": "Ciao", "body": "Testo"})
+    with pytest.raises(NeedsInputError):
+        web.compose_email(ctx, {"to": "marco@example.com", "subject": "", "body": "Testo"})
+    with pytest.raises(NeedsInputError):
+        web.compose_email(ctx, {"to": "marco@example.com", "subject": "Ciao", "body": ""})
+    opened_urls: list[str] = []
+    monkeypatch.setattr(web, "_open", lambda u: opened_urls.append(u))
+    em_ok = web.compose_email(ctx, {"to": "marco@example.com", "subject": "Ciao", "body": "Arrivo alle 18"})
+    assert "marco@example.com" in em_ok and opened_urls and "mail.google.com" in opened_urls[0]
+
+    assert quick.match("registra un video") == quick.Quick("record_video", {"action": "start", "source": "screen", "auto_edit": True})
+    assert quick.match("ferma registrazione") == quick.Quick("record_video", {"action": "stop", "auto_edit": True})
 
     salvaged = local_llm.parse_reply(
         '{"azione": "edit_video", "argomenti": {"editor": "capcut", "files": ["downloaded_video.mp4"], "style":',

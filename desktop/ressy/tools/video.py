@@ -2665,7 +2665,185 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
     ).format(folder=str(bundle_dir), preview=preview_note)
 
 
+_RECORDING_LOCK = threading.Lock()
+_RECORDING_STATE: dict[str, Any] = {"proc": None, "path": None, "source": "screen", "style": "viral", "title": "", "auto_edit": True}
+
+
+def _find_dshow_devices(ffmpeg: str) -> tuple[str | None, str | None]:
+    if sys.platform != "win32":
+        return None, None
+    try:
+        res = subprocess.run(
+            [ffmpeg, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+            capture_output=True,
+            timeout=8,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        out = res.stderr.decode("utf-8", errors="replace")
+        vid, aud = None, None
+        for line in out.splitlines():
+            m = re.search(r'"([^"]+)"\s*\((video|audio)\)', line)
+            if not m:
+                continue
+            if m.group(2) == "video" and vid is None:
+                vid = m.group(1)
+            elif m.group(2) == "audio" and aud is None:
+                aud = m.group(1)
+        return vid, aud
+    except Exception:
+        return None, None
+
+
+def record_video(ctx: ToolContext, args: dict) -> str:
+    action = str(args.get("action") or "start").strip().lower()
+    source = str(args.get("source") or "screen").strip().lower()
+    style = str(args.get("style") or "viral").strip().lower()
+    title = str(args.get("title") or "").strip()
+    auto_edit = bool(args.get("auto_edit", True))
+    duration_s = args.get("duration_s")
+
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise ToolError(tr("FFmpeg non è disponibile per registrare video."))
+
+    if action == "status":
+        with _RECORDING_LOCK:
+            proc = _RECORDING_STATE.get("proc")
+            if proc is not None and proc.poll() is None:
+                return tr("Sto registrando ({source}) in {path}.").format(
+                    source=_RECORDING_STATE["source"], path=str(_RECORDING_STATE["path"])
+                )
+        return tr("Nessuna registrazione video attiva al momento.")
+
+    if action == "stop":
+        with _RECORDING_LOCK:
+            proc = _RECORDING_STATE.get("proc")
+            out_path: Path | None = _RECORDING_STATE.get("path")
+            rec_style = _RECORDING_STATE.get("style") or style
+            rec_title = _RECORDING_STATE.get("title") or title
+            rec_auto = bool(_RECORDING_STATE.get("auto_edit", auto_edit))
+            _RECORDING_STATE["proc"] = None
+        if proc is None or out_path is None:
+            raise ToolError(tr("Non c'è nessuna registrazione video da fermare."))
+        if proc.poll() is None:
+            try:
+                if proc.stdin:
+                    proc.stdin.write(b"q\n")
+                    proc.stdin.flush()
+                proc.wait(timeout=8)
+            except Exception:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=4)
+                except Exception:
+                    proc.kill()
+        if not out_path.is_file() or out_path.stat().st_size < 1024:
+            raise ToolError(tr("La registrazione non ha prodotto un file video valido."))
+        if rec_auto:
+            edit_msg = edit_video(
+                ctx,
+                {
+                    "files": [str(out_path)],
+                    "editor": "capcut",
+                    "style": rec_style,
+                    "title": rec_title,
+                    "auto_captions": True,
+                    "kinetic_broll": True,
+                    "render_preview": True,
+                },
+            )
+            return tr("Registrazione salvata in {file}.\n{edit}").format(file=out_path.name, edit=edit_msg)
+        return tr("Registrazione video salvata in {path}.").format(path=str(out_path))
+
+    with _RECORDING_LOCK:
+        prev = _RECORDING_STATE.get("proc")
+        if prev is not None and prev.poll() is None:
+            raise ToolError(tr("Sto già registrando un video: di' «ferma registrazione» prima di iniziarne un'altra."))
+
+    rec_dir = videos_dir() / "Ressy Registrazioni"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    out_mp4 = rec_dir / f"rec_{dt.datetime.now():%Y%m%d_%H%M%S}.mp4"
+    v_enc, v_opts, a_enc, a_opts = _detect_codecs(ffmpeg)
+    cam_dev, mic_dev = _find_dshow_devices(ffmpeg)
+
+    cmd = [ffmpeg, "-y"]
+    if sys.platform == "win32":
+        if source == "camera":
+            if not cam_dev:
+                raise ToolError(tr("Non trovo nessuna webcam collegata su questo PC."))
+            cmd += ["-f", "dshow", "-i", f"video={cam_dev}" + (f":audio={mic_dev}" if mic_dev else "")]
+        else:
+            cmd += ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
+            if mic_dev:
+                cmd += ["-f", "dshow", "-i", f"audio={mic_dev}"]
+    elif sys.platform == "darwin":
+        cmd += ["-f", "avfoundation", "-framerate", "30", "-i", "0:0" if source == "camera" else "1:0"]
+    else:
+        disp = os.environ.get("DISPLAY") or ":0.0"
+        cmd += ["-f", "x11grab", "-framerate", "30", "-i", disp]
+
+    if duration_s is not None:
+        secs = max(2, min(300, int(float(duration_s))))
+        cmd += ["-t", str(secs)]
+    cmd += ["-pix_fmt", "yuv420p", "-c:v", v_enc, *v_opts]
+    if mic_dev or source == "camera":
+        cmd += ["-c:a", a_enc, *a_opts]
+    cmd.append(str(out_mp4))
+
+    if duration_s is not None:
+        res = subprocess.run(cmd, capture_output=True, timeout=max(30, secs + 30), creationflags=CREATE_NO_WINDOW)
+        if res.returncode != 0 or not out_mp4.is_file():
+            raise ToolError(tr("Registrazione video non riuscita."))
+        if auto_edit:
+            edit_msg = edit_video(
+                ctx,
+                {
+                    "files": [str(out_mp4)],
+                    "editor": "capcut",
+                    "style": style,
+                    "title": title,
+                    "auto_captions": True,
+                    "kinetic_broll": True,
+                    "render_preview": True,
+                },
+            )
+            return tr("Video registrato ({secs}s) in {file}.\n{edit}").format(secs=secs, file=out_mp4.name, edit=edit_msg)
+        return tr("Video registrato in {path}.").format(path=str(out_mp4))
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    with _RECORDING_LOCK:
+        _RECORDING_STATE.update(
+            {"proc": proc, "path": out_mp4, "source": source, "style": style, "title": title, "auto_edit": auto_edit}
+        )
+    return tr("Registrazione avviata ({source})! Dimmi «ferma registrazione» quando hai finito: poi lo edito subito su CapCut con sottotitoli e asset.").format(
+        source=tr("webcam") if source == "camera" else tr("schermo")
+    )
+
+
 TOOLS = [
+    Tool(
+        "record_video",
+        "Registra video (schermo o webcam) e al termine lo edita su CapCut generando sottotitoli e asset.",
+        params(
+            {
+                "action": {"type": "string", "enum": ["start", "stop", "status"]},
+                "source": {"type": "string", "enum": ["screen", "camera"]},
+                "duration_s": {"type": "number", "description": "durata in secondi (opzionale)"},
+                "auto_edit": {"type": "boolean"},
+                "style": {"type": "string", "enum": ["viral", "cinematic", "gaming", "vlog", "minimal"]},
+                "title": {"type": "string"},
+            },
+        ),
+        record_video,
+        timeout=360,
+        uses_screen=True,
+    ),
     Tool(
         "edit_video",
         "Edita video live stile TikTok/Reels (CapCut/DaVinci, sottotitoli automatici dal parlato, B-Roll 3D, SFX, MP4). "

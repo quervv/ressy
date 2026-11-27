@@ -193,15 +193,19 @@ def _clean_name(text: str) -> str:
 
 def _result_rows(lines: list[screen.Line], query_text: str) -> list[screen.Line] | None:
     search_y = None
-    target_norm = normalize(query_text)
-    if target_norm:
+    for q_cand in (query_text, query_text.lstrip("#@")):
+        target_norm = normalize(q_cand)
+        if not target_norm:
+            continue
         for line in lines:
-            if similarity(normalize(line.text), target_norm) >= 0.82:
+            if similarity(normalize(line.text), target_norm) >= 0.80:
                 search_y = line.box[3]
                 break
+        if search_y is not None:
+            break
     if search_y is None:
         for line in lines:
-            if screen.find_text([line], query_text, threshold=0.80) is not None:
+            if screen.find_text([line], query_text.lstrip("#@"), threshold=0.78) is not None:
                 search_y = line.box[3]
                 break
     if search_y is None:
@@ -468,6 +472,9 @@ def send_discord_message(ctx: ToolContext, args: dict) -> str:
 
     if winapi.foreground_window() != window.hwnd:
         raise ToolError(tr("Discord ha perso il focus: messaggio NON inviato."))
+    left, _top, right, bottom = winapi.window_rect(window.hwnd)
+    winapi.click(left + ((right - left) * 3) // 5, bottom - 44)
+    time.sleep(0.15)
     winapi.type_text(message + " ", newline="shift_enter")
     time.sleep(0.35)
     if winapi.foreground_window() != window.hwnd:

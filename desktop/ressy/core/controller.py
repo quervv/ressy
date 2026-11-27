@@ -72,6 +72,7 @@ TOOL_STATUS = {
     "window_action": tr("Sistemo la finestra…"),
     "send_discord_message": tr("Scrivo su Discord…"),
     "read_discord_chat": tr("Leggo Discord…"),
+    "send_telegram_message": tr("Scrivo su Telegram…"),
     "call_phone": tr("Avvio la chiamata…"),
     "open_url": tr("Apro il browser…"),
     "web_search": tr("Cerco sul web…"),
@@ -105,6 +106,7 @@ TOOL_STATUS = {
     "read_screen": tr("Guardo lo schermo…"),
     "click_text": tr("Clicco…"),
     "weather": tr("Guardo il meteo…"),
+    "record_video": tr("Registro il video…"),
     "edit_video": tr("Edito il video…"),
     "run_python": tr("Eseguo uno script Python…"),
     "download_file": tr("Scarico il file…"),
@@ -840,15 +842,28 @@ class Controller:
                 )
             except Exception:
                 log.warning("reminder call escalation failed", exc_info=True)
+        async def _voice_payload(msg: str) -> dict[str, str] | None:
+            import base64
+
+            if not getattr(self.speaker, "voice_note", None):
+                return None
+            try:
+                note = await self.speaker.voice_note(msg)
+                if note is not None and len(note) == 2 and note[0]:
+                    return {"mime": str(note[1]), "data": base64.b64encode(note[0]).decode("ascii")}
+            except Exception:
+                pass
+            return None
+
         if reminder.platform:
-            voice = await self.speaker.voice_note(text) if getattr(self.speaker, "voice_note", None) else None
+            voice = await _voice_payload(text)
             delivered = await self.remote.notify(
                 "⏰ " + text, voice=voice, target={"platform": reminder.platform, "user_id": reminder.user_id}
             )
             if delivered:
                 return
         elif getattr(self.remote, "links", None):
-            voice = await self.speaker.voice_note(text) if getattr(self.speaker, "voice_note", None) else None
+            voice = await _voice_payload(text)
             await self.remote.notify("⏰ " + text, voice=voice)
         self._enqueue(AnnounceJob(text))
 

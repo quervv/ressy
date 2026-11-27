@@ -354,23 +354,27 @@ def _ensure_wifi_call_endpoint(reason: str, speaker: Any = None, audio_bytes: by
 def _match_lan_device(clean: str, devices: list[dict[str, str]]) -> dict[str, str] | None:
     from ..speech.textnorm import normalize, similarity
 
+    ip_match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", clean)
+    if ip_match:
+        ip_found = ip_match.group(1)
+        by_ip = next((d for d in devices if d["ip"] == ip_found), None)
+        return by_ip or {"ip": ip_found, "name": ip_found, "mac": ""}
+
     if clean.isdigit() and 1 <= int(clean) <= len(devices):
         return devices[int(clean) - 1]
-    q_norm = normalize(clean).replace(" ", "")
+
+    spoken_clean = re.sub(r"\b(?:trattino|altro|dash|meno|spazio|punto|numero)\b", " ", clean, flags=re.IGNORECASE)
+    q_norm = normalize(spoken_clean).replace(" ", "")
     best: tuple[float, dict[str, str]] | None = None
     for d in devices:
-        if clean.lower() == d["ip"]:
-            return d
         d_norm = normalize(d["name"]).replace(" ", "")
         if q_norm and (q_norm in d_norm or d_norm in q_norm):
             return d
         score = similarity(q_norm, d_norm)
         if best is None or score > best[0]:
             best = (score, d)
-    if best is not None and best[0] >= 0.62:
+    if best is not None and best[0] >= 0.55:
         return best[1]
-    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", clean):
-        return {"ip": clean, "name": clean, "mac": ""}
     return None
 
 
@@ -444,6 +448,8 @@ def _resolve_target(ctx: ToolContext, platform: str, raw_target: str) -> str:
 
 
 async def _send_urgent_remote_alert(ctx: ToolContext, platform: str, text: str) -> bool:
+    import base64
+
     remote = getattr(ctx.services, "remote", None) if ctx.services else None
     speaker = getattr(ctx.services, "speaker", None) if ctx.services else None
     if remote is None or not getattr(remote, "links", None):
@@ -451,17 +457,41 @@ async def _send_urgent_remote_alert(ctx: ToolContext, platform: str, text: str) 
     target = next((l for l in remote.links if str(l.get("platform") or "").lower() == platform), None)
     if target is None:
         target = remote.links[0]
-    voice = None
+    voice_payload: dict[str, str] | None = None
     if speaker is not None and hasattr(speaker, "voice_note"):
         try:
-            voice = await speaker.voice_note(text)
+            note = await speaker.voice_note(text)
+            if note is not None and len(note) == 2 and note[0]:
+                voice_payload = {"mime": str(note[1]), "data": base64.b64encode(note[0]).decode("ascii")}
         except Exception:
-            voice = None
+            voice_payload = None
     return await remote.notify(
         f"📞 {text}",
-        voice=voice,
+        voice=voice_payload,
         target={"platform": target["platform"], "user_id": target["user_id"]},
     )
+
+
+def send_telegram_message(ctx: ToolContext, args: dict) -> str:
+    recipient = str(args.get("recipient") or "").strip()
+    message = str(args.get("message") or "").strip()
+    if not recipient:
+        raise NeedsInputError(tr("A chi devo scrivere su Telegram?"))
+    if not message:
+        raise NeedsInputError(tr("Il messaggio è vuoto."))
+    win = _open_telegram_chat(ctx, recipient)
+    if winapi.foreground_window() != win.hwnd:
+        raise ToolError(tr("Telegram ha perso il focus: messaggio NON inviato."))
+    left, top, right, bottom = winapi.window_rect(win.hwnd)
+    winapi.click(left + (right - left) // 2, bottom - 34)
+    time.sleep(0.15)
+    winapi.type_text(message, newline="shift_enter")
+    time.sleep(0.25)
+    if winapi.foreground_window() != win.hwnd:
+        raise ToolError(tr("Telegram ha perso il focus mentre scrivevo: controlla la chat."))
+    winapi.tap(winapi.VK["enter"])
+    time.sleep(0.35)
+    return tr("Messaggio inviato su Telegram a {target}.").format(target=recipient)
 
 
 async def call_phone(ctx: ToolContext, args: dict) -> str:
@@ -549,6 +579,21 @@ TOOLS = [
         ),
         call_phone,
         timeout=90,
+        snapshot_on_error=True,
+        uses_screen=True,
+    ),
+    Tool(
+        "send_telegram_message",
+        "Invia un messaggio su Telegram Desktop a un contatto o @username.",
+        params(
+            {
+                "recipient": {"type": "string", "description": "nome contatto o @username"},
+                "message": {"type": "string", "description": "testo del messaggio"},
+            },
+            ["recipient", "message"],
+        ),
+        send_telegram_message,
+        timeout=60,
         snapshot_on_error=True,
         uses_screen=True,
     ),
