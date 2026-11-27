@@ -830,8 +830,7 @@ class Controller:
             plat = getattr(reminder, "call_platform", "") or reminder.platform or "auto"
             ctx = ToolContext(channel=VOICE, services=self.services)
             try:
-                await asyncio.to_thread(
-                    calls.call_phone,
+                await calls.call_phone(
                     ctx,
                     {
                         "platform": plat,

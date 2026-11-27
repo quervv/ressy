@@ -2155,4 +2155,10 @@ EN: dict[str, str] = {
         'Wi-Fi call started to {device}! Open on the device: {url}',
     'Non sono riuscita a completare la risposta, riprova.':
         'I could not finish the answer, please try again.',
+    'Chiamata Wi-Fi da Ressy sul tuo PC!':
+        'Wi-Fi call from Ressy on your PC!',
+    'Ti ho inviato anche la notifica con il link sul telefono.':
+        'I also sent the notification with the link to your phone.',
+    'Ti ho inviato una chiamata vocale/notifica urgente su {plat}!':
+        'I sent an urgent voice call/notification on {plat}!',
 }

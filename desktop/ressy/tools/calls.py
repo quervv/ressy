@@ -256,31 +256,89 @@ def discover_lan_devices(max_items: int = 12) -> list[dict[str, str]]:
 _WIFI_CALL_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ressy Wi-Fi Call</title><style>
 body{margin:0;background:#0e1017;color:#f4f6fb;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.card{background:#181b26;border:1px solid #2b3248;border-radius:20px;padding:28px;max-width:380px;width:90%;text-align:center;box-shadow:0 16px 40px #0008}
-h2{margin:0 0 8px;color:#3cebff}p{color:#b7c0d8;line-height:1.45}.badge{display:inline-block;padding:6px 14px;border-radius:999px;background:#1f3b36;color:#4df0b5;font-weight:600;margin-top:12px}
-</style></head><body><div class="card"><h2>Ressy Wi-Fi Call</h2><p id="msg">CONN</p><div class="badge">Connesso su Wi-Fi locale</div></div></body></html>"""
+.card{background:#181b26;border:1px solid #2b3248;border-radius:22px;padding:26px;max-width:390px;width:90%;text-align:center;box-shadow:0 16px 40px #0008}
+h2{margin:0 0 8px;color:#3cebff}p{color:#b7c0d8;line-height:1.45}.row{display:flex;gap:10px;margin-top:14px}
+button{flex:1;padding:12px 14px;border:0;border-radius:12px;font-weight:700;cursor:pointer;font-size:15px}
+.ans{background:#4df0b5;color:#0b1314}.send{background:#3cebff;color:#08131a}
+input{width:100%;box-sizing:border-box;padding:11px 13px;border-radius:12px;border:1px solid #303952;background:#10131c;color:#fff;margin-top:14px;font-size:15px}
+.badge{display:inline-block;padding:5px 12px;border-radius:999px;background:#1f3b36;color:#4df0b5;font-weight:600;margin-top:10px;font-size:13px}
+</style></head><body><div class="card"><h2>Ressy Wi-Fi Call</h2><p id="msg">CONN</p>
+<div class="badge" id="st">In attesa di risposta…</div>
+<div class="row"><button class="ans" onclick="answerCall()">Rispondi e ascolta</button></div>
+<input id="txt" placeholder="Scrivi qui per parlare sul PC…" onkeydown="if(event.key==='Enter')sendMsg()">
+<div class="row"><button class="send" onclick="sendMsg()">Invia al PC</button></div>
+<audio id="aud" preload="auto"></audio></div>
+<script>
+let ring=null;
+function answerCall(){
+  document.getElementById('st').textContent='Connesso su Wi-Fi locale';
+  const a=document.getElementById('aud'); a.src='/audio'; a.play().catch(()=>{});
+}
+async function sendMsg(){
+  const el=document.getElementById('txt'); const v=el.value.trim(); if(!v) return; el.value='';
+  await fetch('/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});
+  document.getElementById('st').textContent='Inviato al PC: '+v;
+}
+</script></body></html>"""
 
 _WIFI_SERVER_LOCK = __import__("threading").Lock()
 _WIFI_SERVER_URL = ""
+_WIFI_CALL_STATE: dict[str, Any] = {"reason": "Chiamata Wi-Fi attiva con Ressy", "audio": b"", "speaker": None, "loop": None}
 
 
-def _ensure_wifi_call_endpoint(reason: str) -> str:
+def _ensure_wifi_call_endpoint(reason: str, speaker: Any = None, audio_bytes: bytes = b"", loop: Any = None) -> str:
     import http.server
+    import json
     import threading
 
     global _WIFI_SERVER_URL
     with _WIFI_SERVER_LOCK:
+        _WIFI_CALL_STATE["reason"] = reason or "Chiamata Wi-Fi attiva con Ressy"
+        _WIFI_CALL_STATE["audio"] = audio_bytes
+        if speaker is not None:
+            _WIFI_CALL_STATE["speaker"] = speaker
+        if loop is not None:
+            _WIFI_CALL_STATE["loop"] = loop
         if _WIFI_SERVER_URL:
             return _WIFI_SERVER_URL
-        html = _WIFI_CALL_HTML.replace("CONN", reason or "Chiamata Wi-Fi attiva con Ressy").encode("utf-8")
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self) -> None:
+                if self.path.startswith("/audio"):
+                    data = _WIFI_CALL_STATE.get("audio") or b""
+                    self.send_response(200 if data else 204)
+                    if data:
+                        self.send_header("Content-Type", "audio/ogg")
+                        self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    if data:
+                        self.wfile.write(data)
+                    return
+                html = _WIFI_CALL_HTML.replace("CONN", str(_WIFI_CALL_STATE["reason"])).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(html)))
                 self.end_headers()
                 self.wfile.write(html)
+
+            def do_POST(self) -> None:
+                if self.path.startswith("/reply"):
+                    length = int(self.headers.get("Content-Length") or 0)
+                    raw_body = self.rfile.read(min(length, 4096)).decode("utf-8", errors="replace")
+                    try:
+                        text = str(json.loads(raw_body).get("text") or "").strip()
+                    except ValueError:
+                        text = raw_body.strip()
+                    sp = _WIFI_CALL_STATE.get("speaker")
+                    lp = _WIFI_CALL_STATE.get("loop")
+                    if text and sp is not None and lp is not None:
+                        asyncio.run_coroutine_threadsafe(sp.speak(text), lp)
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+                    return
+                self.send_response(404)
+                self.end_headers()
 
             def log_message(self, format: str, *args: Any) -> None:
                 return
@@ -293,7 +351,30 @@ def _ensure_wifi_call_endpoint(reason: str) -> str:
         return _WIFI_SERVER_URL
 
 
-def _call_via_wifi(ctx: ToolContext, target: str, reason: str) -> str:
+def _match_lan_device(clean: str, devices: list[dict[str, str]]) -> dict[str, str] | None:
+    from ..speech.textnorm import normalize, similarity
+
+    if clean.isdigit() and 1 <= int(clean) <= len(devices):
+        return devices[int(clean) - 1]
+    q_norm = normalize(clean).replace(" ", "")
+    best: tuple[float, dict[str, str]] | None = None
+    for d in devices:
+        if clean.lower() == d["ip"]:
+            return d
+        d_norm = normalize(d["name"]).replace(" ", "")
+        if q_norm and (q_norm in d_norm or d_norm in q_norm):
+            return d
+        score = similarity(q_norm, d_norm)
+        if best is None or score > best[0]:
+            best = (score, d)
+    if best is not None and best[0] >= 0.62:
+        return best[1]
+    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", clean):
+        return {"ip": clean, "name": clean, "mac": ""}
+    return None
+
+
+def _call_via_wifi(ctx: ToolContext, target: str, reason: str, audio_bytes: bytes = b"", loop: Any = None) -> tuple[str, str]:
     devices = discover_lan_devices()
     clean = (target or "").strip()
     if not clean:
@@ -309,14 +390,7 @@ def _call_via_wifi(ctx: ToolContext, target: str, reason: str) -> str:
             tr("Quale dispositivo devo scegliere della tua rete?\n{devices}").format(devices=listing)
         )
 
-    chosen = None
-    if clean.isdigit() and 1 <= int(clean) <= len(devices):
-        chosen = devices[int(clean) - 1]
-    else:
-        low = clean.lower()
-        chosen = next((d for d in devices if low in d["name"].lower() or low == d["ip"]), None)
-    if chosen is None and re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", clean):
-        chosen = {"ip": clean, "name": clean, "mac": ""}
+    chosen = _match_lan_device(clean, devices)
     if chosen is None:
         if devices:
             listing = "\n".join(f"{i + 1}. {d['name']} ({d['ip']})" for i, d in enumerate(devices))
@@ -327,9 +401,10 @@ def _call_via_wifi(ctx: ToolContext, target: str, reason: str) -> str:
             )
         raise NeedsInputError(tr("Non trovo il dispositivo «{target}» sulla rete Wi-Fi.").format(target=clean))
 
-    call_url = _ensure_wifi_call_endpoint(reason)
+    speaker = getattr(ctx.services, "speaker", None) if ctx.services else None
+    call_url = _ensure_wifi_call_endpoint(reason, speaker=speaker, audio_bytes=audio_bytes, loop=loop)
     label = f"{chosen['name']} ({chosen['ip']})" if chosen["name"] != chosen["ip"] else chosen["ip"]
-    return tr("Chiamata Wi-Fi avviata verso {device}! Apri sul dispositivo: {url}").format(device=label, url=call_url)
+    return tr("Chiamata Wi-Fi avviata verso {device}! Apri sul dispositivo: {url}").format(device=label, url=call_url), call_url
 
 
 def _choose_platform(ctx: ToolContext, wanted: str) -> str:
@@ -389,21 +464,38 @@ async def _send_urgent_remote_alert(ctx: ToolContext, platform: str, text: str) 
     )
 
 
-def call_phone(ctx: ToolContext, args: dict) -> str:
+async def call_phone(ctx: ToolContext, args: dict) -> str:
     platform = _choose_platform(ctx, str(args.get("platform") or "auto"))
-    target = _resolve_target(ctx, platform, str(args.get("recipient") or ""))
+    raw_recipient = str(args.get("recipient") or "").strip()
+    target = _resolve_target(ctx, platform, raw_recipient)
     reason = str(args.get("reason") or "").strip()
+    remote = getattr(ctx.services, "remote", None) if ctx.services else None
+    speaker = getattr(ctx.services, "speaker", None) if ctx.services else None
+    has_remote_links = bool(remote is not None and getattr(remote, "links", None))
 
     if platform == "wifi":
-        msg = _call_via_wifi(ctx, str(args.get("recipient") or ""), reason)
-        if reason:
+        spoken_text = reason or tr("Chiamata Wi-Fi da Ressy sul tuo PC!")
+        voice_data = b""
+        if speaker is not None and hasattr(speaker, "voice_note"):
             try:
-                loop = getattr(ctx.services, "loop", None) if ctx.services else None
-                if loop is not None and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(_send_urgent_remote_alert(ctx, "telegram", reason), loop).result(timeout=10)
+                note = await speaker.voice_note(spoken_text)
+                if note:
+                    voice_data = note[0]
             except Exception:
                 pass
+        loop = asyncio.get_running_loop()
+        msg, call_url = await asyncio.to_thread(_call_via_wifi, ctx, raw_recipient, spoken_text, voice_data, loop)
+        if has_remote_links:
+            sent = await _send_urgent_remote_alert(ctx, "auto", f"{spoken_text}\n{call_url}")
+            if sent:
+                return msg + " " + tr("Ti ho inviato anche la notifica con il link sul telefono.")
         return msg
+
+    if not target and has_remote_links:
+        alert_text = reason or tr("Chiamata da Ressy sul tuo PC!")
+        sent = await _send_urgent_remote_alert(ctx, platform, alert_text)
+        if sent:
+            return tr("Ti ho inviato una chiamata vocale/notifica urgente su {plat}!").format(plat=platform.title())
 
     if not target and platform == "telegram":
         raise NeedsInputError(
@@ -419,20 +511,17 @@ def call_phone(ctx: ToolContext, args: dict) -> str:
     desktop_err = ""
     desktop_msg = ""
     try:
-        desktop_msg = _call_via_telegram(ctx, target) if platform == "telegram" else _call_via_discord(ctx, target)
+        desktop_msg = await asyncio.to_thread(
+            _call_via_telegram if platform == "telegram" else _call_via_discord, ctx, target
+        )
     except Exception as exc:
         desktop_err = str(exc)
 
     remote_sent = False
-    if reason or desktop_err:
+    if has_remote_links and (reason or desktop_err or not raw_recipient):
         alert_text = reason or tr("Chiamata da Ressy sul tuo PC!")
         try:
-            loop = getattr(ctx.services, "loop", None) if ctx.services else None
-            if loop is not None and loop.is_running():
-                fut = asyncio.run_coroutine_threadsafe(_send_urgent_remote_alert(ctx, platform, alert_text), loop)
-                remote_sent = bool(fut.result(timeout=12))
-            else:
-                remote_sent = asyncio.run(_send_urgent_remote_alert(ctx, platform, alert_text))
+            remote_sent = await _send_urgent_remote_alert(ctx, platform, alert_text)
         except Exception:
             remote_sent = False
 

@@ -94,7 +94,7 @@ START_TIMEOUT_S = 120
 
 LOCAL_TOOLS = (
     "open_app", "close_app", "focus_app", "open_url", "web_search", "play_youtube", "media_control", "set_volume",
-    "weather", "take_screenshot", "system_status", "reminder", "create_folder", "open_folder", "list_windows",
+    "weather", "take_screenshot", "system_status", "reminder", "call_phone", "create_folder", "open_folder", "list_windows",
     "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer", "wait",
 )
 LOCAL_TOOLS_FULL = LOCAL_TOOLS + (

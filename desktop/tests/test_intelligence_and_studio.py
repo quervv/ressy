@@ -803,17 +803,19 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     called: list[tuple[str, str, str]] = []
     monkeypatch.setattr(calls, "_call_via_telegram", lambda _c, tgt: called.append(("telegram", tgt, "")) or f"Chiamo {tgt}!")
     ctx = ToolContext(channel=VOICE, services=SimpleNamespace(settings=settings, remote=None, speaker=None))
-    res = calls.call_phone(ctx, {"platform": "telegram", "recipient": "@marco_test", "reason": "Appuntamento"})
+    res = asyncio.run(calls.call_phone(ctx, {"platform": "telegram", "recipient": "@marco_test", "reason": "Appuntamento"}))
     assert "Chiamo @marco_test" in res and called == [("telegram", "@marco_test", "")]
 
-    monkeypatch.setattr(calls, "discover_lan_devices", lambda: [{"ip": "192.168.1.15", "name": "iPhone-Marco", "mac": "aa:bb:cc"}])
+    monkeypatch.setattr(calls, "discover_lan_devices", lambda: [{"ip": "192.168.1.3", "name": "POCO-X6-5G", "mac": "aa:bb:cc"}])
     qw = quick.match("chiamami in wifi")
     assert qw is not None and qw.tool == "call_phone" and qw.args["platform"] == "wifi"
     with pytest.raises(Exception) as exc_wifi:
-        calls.call_phone(ctx, {"platform": "wifi"})
-    assert "iPhone-Marco" in str(exc_wifi.value) and "192.168.1.15" in str(exc_wifi.value)
-    wifi_ok = calls.call_phone(ctx, {"platform": "wifi", "recipient": "iPhone-Marco"})
-    assert "iPhone-Marco" in wifi_ok and "http://" in wifi_ok
+        asyncio.run(calls.call_phone(ctx, {"platform": "wifi"}))
+    assert "POCO-X6-5G" in str(exc_wifi.value) and "192.168.1.3" in str(exc_wifi.value)
+    wifi_ok = asyncio.run(calls.call_phone(ctx, {"platform": "wifi", "recipient": "Poco X6"}))
+    assert "POCO-X6-5G" in wifi_ok and "http://" in wifi_ok
+    wifi_fuzzy = asyncio.run(calls.call_phone(ctx, {"platform": "wifi", "recipient": "poco xz 5g"}))
+    assert "POCO-X6-5G" in wifi_fuzzy and "http://" in wifi_fuzzy
 
     salvaged = local_llm.parse_reply(
         '{"azione": "edit_video", "argomenti": {"editor": "capcut", "files": ["downloaded_video.mp4"], "style":',
