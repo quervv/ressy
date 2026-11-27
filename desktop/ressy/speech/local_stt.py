@@ -140,6 +140,7 @@ class LocalWhisper:
         self._model = Model(
             str(model_path(name)),
             n_threads=max(2, min(6, (os.cpu_count() or 4) - 1)),
+            params_sampling_strategy=1,
             print_progress=False,
             print_realtime=False,
             print_timestamps=False,
@@ -168,7 +169,7 @@ class LocalWhisper:
                 single_segment=False,
                 suppress_blank=True,
                 no_speech_thold=0.55,
-                beam_search={"beam_size": 2},
+                beam_search={"beam_size": 2, "patience": -1.0},
             )
             self._schedule_unload_locked()
         out = []

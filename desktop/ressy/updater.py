@@ -66,7 +66,9 @@ def release_from(data: dict) -> Release | None:
 
 
 def can_update() -> bool:
-    return bool(getattr(sys, "frozen", False)) and sys.platform == "win32"
+    from .paths import is_frozen
+
+    return is_frozen() and sys.platform == "win32"
 
 
 def check(timeout: float = 15.0) -> Release | None:

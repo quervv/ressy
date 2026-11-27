@@ -88,18 +88,29 @@ def ensure_dirs() -> None:
         folder.mkdir(parents=True, exist_ok=True)
 
 
+def _is_embedded_app() -> bool:
+    exe = Path(sys.executable)
+    return exe.name.lower() in ("pythonw.exe", "python.exe") and (exe.parent / "app" / "ressy").is_dir()
+
+
 def is_frozen() -> bool:
-    return bool(getattr(sys, "frozen", False))
+    return bool(getattr(sys, "frozen", False)) or _is_embedded_app()
 
 
 def resource_path(relative: str) -> Path:
-    if is_frozen() and hasattr(sys, "_MEIPASS"):
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS) / "ressy" / relative
+    if _is_embedded_app():
+        return Path(sys.executable).parent / "app" / "ressy" / relative
     return Path(__file__).resolve().parent / relative
 
 
 def launch_command() -> list[str]:
-    if is_frozen():
+    if _is_embedded_app():
+        exe = Path(sys.executable)
+        pythonw = exe.with_name("pythonw.exe")
+        return [str(pythonw if pythonw.exists() else exe), "-m", "ressy"]
+    if getattr(sys, "frozen", False):
         return [sys.executable]
     exe = Path(sys.executable)
     if sys.platform == "win32":

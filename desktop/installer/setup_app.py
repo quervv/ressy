@@ -177,8 +177,10 @@ class Backdrop(QWidget):
 
 
 def copy_payload(folder: Path, progress) -> None:
-    if (folder / install.APP_EXE).exists():
+    if (folder / install.APP_EXE).exists() or (folder / "pythonw.exe").exists():
         shutil.rmtree(folder / "_internal", ignore_errors=True)
+        shutil.rmtree(folder / "app", ignore_errors=True)
+        (folder / install.APP_EXE).unlink(missing_ok=True)
     folder.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(payload_path()) as zf:
         members = [m for m in zf.infolist() if not m.is_dir()]
@@ -273,12 +275,11 @@ class UpdateWindow(Backdrop):
         self.thread.start()
 
     def _done(self, error: str) -> None:
-        exe = self.folder / install.APP_EXE
-        if exe.exists():
+        if install.runtime_exe(self.folder).exists():
             flags = install.DETACHED_PROCESS
             if self.worker.server_was_running:
-                subprocess.Popen([str(exe), "--server"], creationflags=flags, close_fds=True)
-            subprocess.Popen([str(exe), "--background"], creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(self.folder, "--server"), creationflags=flags, close_fds=True)
+            subprocess.Popen(install.runtime_cmd(self.folder, "--background"), creationflags=flags, close_fds=True)
         if error:
             self.status.setText(tr("Aggiornamento non riuscito: {error}\nPuoi scaricare Ressy da ressy.top.").format(error=error))
             self.close_button.show()
@@ -334,22 +335,26 @@ class Installer(QObject):
             settings.save()
 
         self.step.emit(tr("Creo i collegamenti…"), 85)
+        exe = install.runtime_exe(folder)
+        is_py = exe.name.lower() == "pythonw.exe"
+        prefix = "-m ressy " if is_py else ""
         menu = install.start_menu_dir()
         for old in menu.glob("*.lnk"):
             old.unlink(missing_ok=True)
         if plan["app"]:
-            install.create_shortcut(menu / "Ressy.lnk", exe, "", tr("Ressy, l'assistente vocale"))
+            install.create_shortcut(menu / "Ressy.lnk", exe, "-m ressy" if is_py else "", tr("Ressy, l'assistente vocale"))
             if plan["desktop"]:
-                install.create_shortcut(install.desktop_dir() / "Ressy.lnk", exe, "", tr("Ressy, l'assistente vocale"))
+                install.create_shortcut(install.desktop_dir() / "Ressy.lnk", exe, "-m ressy" if is_py else "", tr("Ressy, l'assistente vocale"))
         if plan["server"]:
-            install.create_shortcut(menu / tr("Ressy Server.lnk"), exe, "--server", tr("Il server del tuo bot"))
-            install.create_shortcut(menu / tr("Ferma Ressy Server.lnk"), exe, "--server-stop", tr("Ferma il server del bot"))
-        install.create_shortcut(menu / tr("Disinstalla Ressy.lnk"), exe, "--uninstall", tr("Disinstalla Ressy"))
+            install.create_shortcut(menu / tr("Ressy Server.lnk"), exe, f"{prefix}--server", tr("Il server del tuo bot"))
+            install.create_shortcut(menu / tr("Ferma Ressy Server.lnk"), exe, f"{prefix}--server-stop", tr("Ferma il server del bot"))
+        install.create_shortcut(menu / tr("Disinstalla Ressy.lnk"), exe, f"{prefix}--uninstall", tr("Disinstalla Ressy"))
 
         self.step.emit(tr("Avvio con Windows…"), 92)
-        quoted = subprocess.list2cmdline([str(exe)])
-        install.set_run(install.RUN_APP, f"{quoted} --background" if plan["app"] and plan["autostart"] else None)
-        install.set_run(install.RUN_SERVER, f"{quoted} --server" if plan["server"] else None)
+        bg_cmd = subprocess.list2cmdline(install.runtime_cmd(folder, "--background"))
+        srv_cmd = subprocess.list2cmdline(install.runtime_cmd(folder, "--server"))
+        install.set_run(install.RUN_APP, bg_cmd if plan["app"] and plan["autostart"] else None)
+        install.set_run(install.RUN_SERVER, srv_cmd if plan["server"] else None)
 
         size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) // 1024
         install.register_uninstall(folder, size)
@@ -832,12 +837,12 @@ class Setup(Backdrop):
 
     def _finish(self) -> None:
         if self.launch.isChecked():
-            exe = self.plan["folder"] / install.APP_EXE
+            folder = self.plan["folder"]
             flags = install.DETACHED_PROCESS
             if self.plan["server"]:
-                subprocess.Popen([str(exe), "--server"], creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(folder, "--server"), creationflags=flags, close_fds=True)
             if self.plan["app"]:
-                subprocess.Popen([str(exe)], creationflags=flags, close_fds=True)
+                subprocess.Popen(install.runtime_cmd(folder), creationflags=flags, close_fds=True)
         QApplication.quit()
 
 
@@ -852,7 +857,7 @@ def main() -> int:
         QMessageBox.critical(None, "Ressy", tr("Il pacchetto di installazione è danneggiato: scaricalo di nuovo."))
         return 1
     folder = install.installed_dir() if UPDATE else None
-    if UPDATE and folder is not None and (folder / install.APP_EXE).exists():
+    if UPDATE and folder is not None and install.runtime_exe(folder).exists():
         window = UpdateWindow(folder)
     else:
         window = Setup()

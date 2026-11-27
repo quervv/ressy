@@ -101,35 +101,65 @@ def make_version_file(name: str, original_filename: str, description: str) -> Pa
     return out
 
 
+EMBED_URL = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+_DEV_SKIP_PREFIXES = (
+    "pip", "setuptools", "wheel", "pkg_resources", "pytest", "_pytest", "pluggy", "iniconfig",
+    "pyinstaller", "_pyinstaller_hooks_contrib", "altgraph", "pefile", "pywin32_ctypes", "__pycache__",
+)
+
+
+def build_signed_app(icon: Path) -> Path:
+    import urllib.request
+
+    embed_dir = BUILD / "py_embed"
+    embed_dir.mkdir(parents=True, exist_ok=True)
+    embed_zip = embed_dir / "python-3.12.10-embed-amd64.zip"
+    if not embed_zip.is_file():
+        urllib.request.urlretrieve(EMBED_URL, embed_zip)
+
+    target = DIST / "Ressy"
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(embed_zip) as zf:
+        zf.extractall(target)
+
+    for pth in target.glob("python*._pth"):
+        pth.write_text("python312.zip\n.\napp\nimport site\n", encoding="utf-8")
+
+    shutil.copy2(icon, target / "ressy.ico")
+    app_dir = target / "app"
+    app_dir.mkdir(parents=True, exist_ok=True)
+
+    site_pkgs = Path(sys.executable).resolve().parents[1] / "Lib" / "site-packages"
+    if not site_pkgs.is_dir():
+        import site
+        site_pkgs = Path(site.getsitepackages()[-1])
+    for item in site_pkgs.iterdir():
+        low = item.name.lower()
+        if low.endswith((".dist-info", ".egg-info", ".pth")) or any(
+            low == p or low.startswith(p + "-") for p in _DEV_SKIP_PREFIXES
+        ):
+            continue
+        dst = app_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "tests"))
+        else:
+            shutil.copy2(item, dst)
+
+    shutil.copytree(DESKTOP / "ressy", app_dir / "ressy", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(SERVER / "ressy_server", app_dir / "ressy_server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+
+    subprocess.run(
+        [str(target / "python.exe"), "-c", "import ressy, ressy.app, ressy.tools.calls, ressy.tools.video, ressy_server; print('SIGNED_APP_OK')"],
+        check=True,
+        cwd=target,
+    )
+    return target
+
+
 def pyinstaller(icon: Path) -> Path:
-    sep = os.pathsep
-    ver_file = make_version_file("Ressy", "Ressy.exe", "Ressy - Assistente Vocale AI")
-    args = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean", "--noupx", "--windowed",
-        "--name", "Ressy",
-        "--icon", str(icon),
-        "--version-file", str(ver_file),
-        "--workpath", str(BUILD / "pyinstaller"),
-        "--distpath", str(DIST),
-        "--specpath", str(BUILD),
-        "--add-data", f"{DESKTOP / 'ressy' / 'assets'}{sep}ressy/assets",
-        "--paths", str(SERVER),
-    ]
-    for name in HIDDEN:
-        args += ["--hidden-import", name]
-    for name in COLLECT:
-        args += ["--collect-all", name]
-    for name in SUBMODULES:
-        args += ["--collect-submodules", name]
-    for name in DATA:
-        args += ["--collect-data", name]
-    args.append(str(DESKTOP / "ressy" / "__main__.py"))
-    subprocess.run(args, check=True, cwd=DESKTOP)
-    exe = DIST / "Ressy" / "Ressy.exe"
-    if not exe.exists():
-        raise SystemExit(f"build failed: {exe} missing")
-    return DIST / "Ressy"
+    return build_signed_app(icon)
 
 
 def setup_exe(icon: Path, payload: Path, out: Path) -> Path:

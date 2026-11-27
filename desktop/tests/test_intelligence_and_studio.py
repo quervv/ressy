@@ -766,6 +766,13 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     lw._name = "base-q5_1"
     lw.release()
     assert lw._model is None and lw._name == ""
+    if local_stt.is_downloaded("base-q5_1"):
+        real_lw = local_stt.LocalWhisper()
+        try:
+            out_real = real_lw.transcribe(np.zeros(16000, dtype=np.float32), name="base-q5_1", language="it", prompt="")
+            assert isinstance(out_real, dict) and "text" in out_real
+        finally:
+            real_lw.release()
 
     tts_src = (Path(__file__).resolve().parents[1] / "ressy" / "speech" / "tts.py").read_text(encoding="utf-8")
     inst_src = (Path(__file__).resolve().parents[1] / "ressy" / "install.py").read_text(encoding="utf-8")

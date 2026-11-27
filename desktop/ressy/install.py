@@ -62,20 +62,40 @@ def _reg_set(key_path: str, name: str, value: str | int | None) -> None:
         winreg.SetValueEx(key, name, 0, kind, value)
 
 
+def runtime_exe(install_dir: Path) -> Path:
+    pyw = install_dir / "pythonw.exe"
+    if pyw.is_file() and (install_dir / "app" / "ressy").is_dir():
+        return pyw
+    return install_dir / APP_EXE
+
+
+def runtime_cmd(install_dir: Path, *extra: str) -> list[str]:
+    exe = runtime_exe(install_dir)
+    if exe.name.lower() == "pythonw.exe":
+        return [str(exe), "-m", "ressy", *extra]
+    return [str(exe), *extra]
+
+
+def runtime_icon(install_dir: Path) -> str:
+    ico = install_dir / "ressy.ico"
+    if ico.is_file():
+        return str(ico)
+    return f"{runtime_exe(install_dir)},0"
+
+
 def set_run(name: str, command: str | None) -> None:
     _reg_set(RUN_KEY, name, command)
 
 
 def register_uninstall(install_dir: Path, size_kb: int) -> None:
-    exe = install_dir / APP_EXE
     values: dict[str, str | int] = {
         "DisplayName": "Ressy",
         "DisplayVersion": __version__,
         "Publisher": "Ressy (open source, MIT)",
-        "DisplayIcon": f'"{exe}",0',
+        "DisplayIcon": runtime_icon(install_dir),
         "InstallLocation": str(install_dir),
-        "UninstallString": subprocess.list2cmdline([str(exe), "--uninstall"]),
-        "QuietUninstallString": subprocess.list2cmdline([str(exe), "--uninstall", "--quiet"]),
+        "UninstallString": subprocess.list2cmdline(runtime_cmd(install_dir, "--uninstall")),
+        "QuietUninstallString": subprocess.list2cmdline(runtime_cmd(install_dir, "--uninstall", "--quiet")),
         "URLInfoAbout": "https://ressy.top",
         "EstimatedSize": int(size_kb),
         "NoModify": 1,
@@ -145,7 +165,9 @@ def create_shortcut(link: Path, target: Path, args: str = "", description: str =
         if args:
             _vcall(sl_ptr, 11, c_long, c_wchar_p)(sl_ptr, args)
         _vcall(sl_ptr, 9, c_long, c_wchar_p)(sl_ptr, str(target.parent))
-        _vcall(sl_ptr, 17, c_long, c_wchar_p, c_int)(sl_ptr, f"{target},0", 0)
+        ico = target.parent / "ressy.ico"
+        icon_loc = str(ico) if ico.is_file() else f"{target},0"
+        _vcall(sl_ptr, 17, c_long, c_wchar_p, c_int)(sl_ptr, icon_loc, 0)
         if description:
             _vcall(sl_ptr, 7, c_long, c_wchar_p)(sl_ptr, description)
 
@@ -278,16 +300,22 @@ def ask_app_to_quit(timeout_ms: int = 4000) -> bool:
 def wait_unlocked(folder: Path, seconds: float = 10.0) -> bool:
     import time
 
-    exe = folder / APP_EXE
+    targets = [folder / APP_EXE, folder / "pythonw.exe", folder / "python312.dll"]
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if not exe.exists():
+        locked = False
+        for exe in targets:
+            if not exe.exists():
+                continue
+            try:
+                with open(exe, "r+b"):
+                    pass
+            except OSError:
+                locked = True
+                break
+        if not locked:
             return True
-        try:
-            with open(exe, "r+b"):
-                return True
-        except OSError:
-            time.sleep(0.3)
+        time.sleep(0.3)
     return False
 
 
@@ -308,7 +336,7 @@ def uninstall(folder: Path, remove_data: bool) -> None:
     unregister_uninstall()
     if remove_data:
         shutil.rmtree(app_dir(), ignore_errors=True)
-    if (folder / APP_EXE).exists():
+    if runtime_exe(folder).exists():
         schedule_folder_removal(folder)
 
 
