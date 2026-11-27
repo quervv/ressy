@@ -64,7 +64,10 @@ UPDATE = "--update" in sys.argv[1:]
 def relaunch_in(code: str) -> None:
     args = [a for a in sys.argv[1:] if not a.startswith(LANG_ARG)] + [LANG_ARG + code]
     env = None
-    if getattr(sys, "frozen", False):
+    setup_exe = os.environ.get("RESSY_SETUP_EXE")
+    if setup_exe:
+        command = [setup_exe, *args]
+    elif getattr(sys, "frozen", False):
         command = [sys.executable, *args]
         env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
     else:
@@ -81,6 +84,9 @@ def payload_path() -> Path:
     files = [a for a in sys.argv[1:] if not a.startswith("--")]
     if files:
         return Path(files[0])
+    env_payload = os.environ.get("RESSY_PAYLOAD_ZIP")
+    if env_payload:
+        return Path(env_payload)
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return base / "payload" / "Ressy-win64.zip"
 

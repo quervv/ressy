@@ -149,6 +149,7 @@ def build_signed_app(icon: Path) -> Path:
 
     shutil.copytree(DESKTOP / "ressy", app_dir / "ressy", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copytree(SERVER / "ressy_server", app_dir / "ressy_server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copy2(DESKTOP / "installer" / "setup_app.py", app_dir / "setup_app.py")
 
     csc = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     if sys.platform == "win32" and csc.is_file():
@@ -225,6 +226,121 @@ def pyinstaller(icon: Path) -> Path:
 
 
 def setup_exe(icon: Path, payload: Path, out: Path) -> Path:
+    csc = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    if sys.platform == "win32" and csc.is_file():
+        import struct
+        from ressy import __version__
+
+        ver_parts = [p for p in __version__.split(".")[:3] if p.isdigit()]
+        while len(ver_parts) < 4:
+            ver_parts.append("0")
+        ver_quad = ".".join(ver_parts)
+        stub_cs = BUILD / "SetupStub.cs"
+        stub_exe = BUILD / "SetupStub.exe"
+        stub_cs.write_text(
+            f"""using System;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
+using System.Reflection;
+using System.Text;
+
+[assembly: AssemblyTitle("Ressy Setup")]
+[assembly: AssemblyDescription("Programma di installazione di Ressy")]
+[assembly: AssemblyProduct("Ressy")]
+[assembly: AssemblyCompany("Ressy Project")]
+[assembly: AssemblyVersion("{ver_quad}")]
+[assembly: AssemblyFileVersion("{ver_quad}")]
+
+static class SetupStub {{
+    static string Quote(string arg) {{
+        return "\\"" + arg.Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"") + "\\"";
+    }}
+
+    [STAThread]
+    static int Main(string[] args) {{
+        string selfPath = Assembly.GetExecutingAssembly().Location;
+        string tempDir = Path.Combine(Path.GetTempPath(), "RessySetup_" + Process.GetCurrentProcess().Id);
+        try {{
+            Directory.CreateDirectory(tempDir);
+            string payloadZip = Path.Combine(tempDir, "Ressy-win64.zip");
+            using (var fs = new FileStream(selfPath, FileMode.Open, FileAccess.Read, FileShare.Read)) {{
+                if (fs.Length < 16) return 1;
+                fs.Seek(-16, SeekOrigin.End);
+                byte[] trailer = new byte[16];
+                if (fs.Read(trailer, 0, 16) != 16) return 1;
+                if (Encoding.ASCII.GetString(trailer, 8, 8) != "RESSYZIP") return 1;
+                long zipStart = BitConverter.ToInt64(trailer, 0);
+                long zipLen = fs.Length - 16 - zipStart;
+                if (zipStart <= 0 || zipLen <= 0) return 1;
+                fs.Seek(zipStart, SeekOrigin.Begin);
+                using (var outZip = new FileStream(payloadZip, FileMode.Create, FileAccess.Write, FileShare.None)) {{
+                    byte[] buf = new byte[1048576];
+                    long remaining = zipLen;
+                    while (remaining > 0) {{
+                        int toRead = (int)Math.Min(buf.Length, remaining);
+                        int read = fs.Read(buf, 0, toRead);
+                        if (read <= 0) break;
+                        outZip.Write(buf, 0, read);
+                        remaining -= read;
+                    }}
+                }}
+            }}
+            ZipFile.ExtractToDirectory(payloadZip, tempDir);
+            string ressyDir = Path.Combine(tempDir, "Ressy");
+            string pythonw = Path.Combine(ressyDir, "pythonw.exe");
+            string setupScript = Path.Combine(ressyDir, "app", "setup_app.py");
+            var argList = new StringBuilder();
+            argList.Append(Quote(setupScript));
+            for (int i = 0; i < args.Length; i++) {{
+                argList.Append(" ");
+                argList.Append(Quote(args[i]));
+            }}
+            var psi = new ProcessStartInfo(pythonw, argList.ToString());
+            psi.UseShellExecute = false;
+            psi.WorkingDirectory = ressyDir;
+            psi.EnvironmentVariables["RESSY_PAYLOAD_ZIP"] = payloadZip;
+            psi.EnvironmentVariables["RESSY_SETUP_EXE"] = selfPath;
+            using (var proc = Process.Start(psi)) {{
+                if (proc == null) return 1;
+                proc.WaitForExit();
+                return proc.ExitCode;
+            }}
+        }} finally {{
+            try {{
+                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+            }} catch {{ }}
+        }}
+    }}
+}}
+""",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                str(csc),
+                "/nologo",
+                "/platform:x64",
+                "/target:winexe",
+                "/optimize+",
+                f"/win32icon:{icon}",
+                "/r:System.IO.Compression.dll",
+                "/r:System.IO.Compression.FileSystem.dll",
+                f"/out:{stub_exe}",
+                str(stub_cs),
+            ],
+            check=True,
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".tmp")
+        with stub_exe.open("rb") as f_stub, payload.open("rb") as f_zip, tmp.open("wb") as f_out:
+            shutil.copyfileobj(f_stub, f_out, 1048576)
+            zip_start = f_out.tell()
+            shutil.copyfileobj(f_zip, f_out, 1048576)
+            f_out.write(struct.pack("<q8s", zip_start, b"RESSYZIP"))
+        tmp.replace(out)
+        return out
+
     sep = os.pathsep
     ver_file = make_version_file("Ressy-Setup", "Ressy-Setup.exe", "Programma di installazione di Ressy")
     args = [
