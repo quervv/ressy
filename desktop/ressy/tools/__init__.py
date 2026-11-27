@@ -17,10 +17,10 @@ async def _api_usage(ctx: ToolContext, args: dict) -> str:
 
 
 def build_registry() -> ToolRegistry:
-    from . import apps, discord, more, reminders, system, video, web
+    from . import apps, calls, discord, more, reminders, system, video, web
 
     registry = ToolRegistry()
-    registry.extend(apps.TOOLS + discord.TOOLS + web.TOOLS + system.TOOLS + reminders.TOOLS + more.TOOLS + video.TOOLS)
+    registry.extend(apps.TOOLS + calls.TOOLS + discord.TOOLS + web.TOOLS + system.TOOLS + reminders.TOOLS + more.TOOLS + video.TOOLS)
     registry.add(
         Tool(
             "go_to_sleep",

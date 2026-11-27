@@ -175,6 +175,8 @@ class Settings:
     agent_secret: str = ""
     speak_remote_replies: bool = False
     notify_remote_commands: bool = True
+    call_discord_target: str = ""
+    call_telegram_target: str = ""
 
     home_city: str = ""
 
@@ -260,6 +262,8 @@ class Settings:
             self.remote_enabled = False
         self.telegram_token = (self.telegram_token or "").strip()
         self.discord_token = (self.discord_token or "").strip()
+        self.call_discord_target = (self.call_discord_target or "").strip()[:80]
+        self.call_telegram_target = (self.call_telegram_target or "").strip()[:80]
         self.home_city = (self.home_city or "").strip()[:80]
         if self.llm_provider not in LLM_PROVIDERS:
             self.llm_provider = "groq"

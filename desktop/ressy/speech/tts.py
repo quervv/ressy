@@ -113,22 +113,20 @@ class Speaker:
             culture = "en" if self.settings.language == "en" else "it"
             rate = max(-10, min(10, round(int(self.settings.tts_rate) / 5)))
             script = (
-                "$ErrorActionPreference = 'Stop'\n"
-                "Add-Type -AssemblyName System.Speech\n"
-                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer\n"
-                "try {\n"
-                f"  $v = $s.GetInstalledVoices() | Where-Object {{ $_.Enabled -and "
-                f"$_.VoiceInfo.Culture.Name -like '{culture}*' }} | Select-Object -First 1\n"
-                "  if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }\n"
-                f"  $s.Rate = {rate}\n"
-                f"  $s.SetOutputToWaveFile({_ps_quote(wav_path)})\n"
-                f"  $s.Speak([System.IO.File]::ReadAllText({_ps_quote(txt_path)}, [System.Text.Encoding]::UTF8))\n"
-                "} finally { $s.Dispose() }\n"
+                "$ErrorActionPreference = 'Stop'; "
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "try { "
+                f"$v = $s.GetInstalledVoices() | Where-Object {{ $_.Enabled -and "
+                f"$_.VoiceInfo.Culture.Name -like '{culture}*' }} | Select-Object -First 1; "
+                "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
+                f"$s.Rate = {rate}; "
+                f"$s.SetOutputToWaveFile({_ps_quote(wav_path)}); "
+                f"$s.Speak([System.IO.File]::ReadAllText({_ps_quote(txt_path)}, [System.Text.Encoding]::UTF8)) "
+                "} finally { $s.Dispose() }"
             )
-            encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
             subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                 "-EncodedCommand", encoded],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                 check=True,
                 capture_output=True,
                 timeout=90,

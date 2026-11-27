@@ -351,7 +351,7 @@ class AppIndex:
             "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress"
         )
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             timeout=30,
             creationflags=CREATE_NO_WINDOW,

@@ -106,24 +106,61 @@ def installed_dir() -> Path | None:
 
 
 def create_shortcut(link: Path, target: Path, args: str = "", description: str = "") -> None:
+    import ctypes
+    from ctypes import POINTER, Structure, c_int, c_long, c_void_p, c_wchar_p, wintypes
+
     link.parent.mkdir(parents=True, exist_ok=True)
 
-    def q(text: str) -> str:
-        return "'" + text.replace("'", "''") + "'"
+    class GUID(Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", wintypes.BYTE * 8),
+        ]
 
-    script = (
-        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + q(str(link)) + ");"
-        "$s.TargetPath = " + q(str(target)) + ";"
-        "$s.Arguments = " + q(args) + ";"
-        "$s.WorkingDirectory = " + q(str(target.parent)) + ";"
-        "$s.IconLocation = " + q(f"{target},0") + ";"
-        "$s.Description = " + q(description) + ";"
-        "$s.Save()"
+    def _guid(s: str) -> GUID:
+        import uuid
+        return GUID.from_buffer_copy(uuid.UUID(s).bytes_le)
+
+    CLSID_ShellLink = _guid("00021401-0000-0000-C000-000000000046")
+    IID_IShellLinkW = _guid("000214F9-0000-0000-C000-000000000046")
+    IID_IPersistFile = _guid("0000010b-0000-0000-C000-000000000046")
+
+    ole32 = ctypes.OleDLL("ole32")
+    ole32.CoInitializeEx(None, 2)
+    sl_ptr = c_void_p()
+    hr = ole32.CoCreateInstance(
+        ctypes.byref(CLSID_ShellLink), None, 1, ctypes.byref(IID_IShellLinkW), ctypes.byref(sl_ptr)
     )
-    subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-        check=True, creationflags=CREATE_NO_WINDOW, capture_output=True, timeout=60,
-    )
+    if hr != 0 or not sl_ptr:
+        raise OSError(f"CoCreateInstance IShellLinkW failed: {hr:#x}")
+
+    def _vcall(obj_ptr: c_void_p, index: int, restype: Any, *argtypes: Any):
+        vtbl = ctypes.cast(obj_ptr, POINTER(POINTER(c_void_p))).contents
+        return ctypes.WINFUNCTYPE(restype, c_void_p, *argtypes)(vtbl[index])
+
+    try:
+        _vcall(sl_ptr, 20, c_long, c_wchar_p)(sl_ptr, str(target))
+        if args:
+            _vcall(sl_ptr, 11, c_long, c_wchar_p)(sl_ptr, args)
+        _vcall(sl_ptr, 9, c_long, c_wchar_p)(sl_ptr, str(target.parent))
+        _vcall(sl_ptr, 17, c_long, c_wchar_p, c_int)(sl_ptr, f"{target},0", 0)
+        if description:
+            _vcall(sl_ptr, 7, c_long, c_wchar_p)(sl_ptr, description)
+
+        pf_ptr = c_void_p()
+        hr = _vcall(sl_ptr, 0, c_long, POINTER(GUID), POINTER(c_void_p))(
+            sl_ptr, ctypes.byref(IID_IPersistFile), ctypes.byref(pf_ptr)
+        )
+        if hr != 0 or not pf_ptr:
+            raise OSError(f"QueryInterface IPersistFile failed: {hr:#x}")
+        try:
+            _vcall(pf_ptr, 6, c_long, c_wchar_p, wintypes.BOOL)(pf_ptr, str(link), True)
+        finally:
+            _vcall(pf_ptr, 2, wintypes.ULONG)(pf_ptr)
+    finally:
+        _vcall(sl_ptr, 2, wintypes.ULONG)(sl_ptr)
 
 
 def remove_shortcuts() -> None:
@@ -255,13 +292,10 @@ def wait_unlocked(folder: Path, seconds: float = 10.0) -> bool:
 
 
 def schedule_folder_removal(folder: Path) -> None:
-    pid = os.getpid()
-    script = (
-        f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; "
-        "Remove-Item -LiteralPath '" + str(folder).replace("'", "''") + "' -Recurse -Force -ErrorAction SilentlyContinue"
-    )
+    escaped = str(folder).replace('"', '""')
+    cmd = f'ping -n 3 127.0.0.1 >nul & rmdir /s /q "{escaped}"'
     subprocess.Popen(
-        ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
+        ["cmd.exe", "/c", cmd],
         creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS, close_fds=True,
     )
 

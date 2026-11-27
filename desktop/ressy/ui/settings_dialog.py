@@ -387,6 +387,14 @@ class SettingsDialog(QDialog):
         self.device_name = QLineEdit()
         self.device_name.setMaxLength(64)
         form.addRow(tr("Nome di questo PC"), self.device_name)
+        self.call_discord = QLineEdit()
+        self.call_discord.setMaxLength(80)
+        self.call_discord.setPlaceholderText(tr("es. nomeutente (opzionale, per chiamate)"))
+        form.addRow(tr("Contatto Discord per chiamate"), self.call_discord)
+        self.call_telegram = QLineEdit()
+        self.call_telegram.setMaxLength(80)
+        self.call_telegram.setPlaceholderText(tr("es. @nomeutente (opzionale, per chiamate)"))
+        form.addRow(tr("Contatto Telegram per chiamate"), self.call_telegram)
         layout.addLayout(form)
         pair_row = QHBoxLayout()
         pair = QPushButton(tr("Collega Telegram o Discord…"))
@@ -517,6 +525,8 @@ class SettingsDialog(QDialog):
             telegram=s.telegram_token, discord=s.discord_token,
         )
         self.device_name.setText(s.device_name)
+        self.call_discord.setText(s.call_discord_target)
+        self.call_telegram.setText(s.call_telegram_target)
         self.speak_remote.setChecked(s.speak_remote_replies)
         self.notify_remote.setChecked(s.notify_remote_commands)
         self._on_remote_state(self.controller.remote.state, self.controller.remote.detail)
@@ -654,6 +664,8 @@ class SettingsDialog(QDialog):
             "output_device": self.output_device.currentData() or "",
             **self.bot_setup.values(),
             "device_name": self.device_name.text().strip() or self.settings.device_name,
+            "call_discord_target": self.call_discord.text().strip(),
+            "call_telegram_target": self.call_telegram.text().strip(),
             "speak_remote_replies": self.speak_remote.isChecked(),
             "notify_remote_commands": self.notify_remote.isChecked(),
             "first_run_done": True,

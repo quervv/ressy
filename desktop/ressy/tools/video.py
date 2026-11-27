@@ -465,7 +465,8 @@ def _chunk_words_into_timeline(
     chunks: list[dict[str, Any]] = []
     for seg in segments:
         raw = str(seg.get("text") or "").strip()
-        words = [w for w in raw.split() if w]
+        words = [w.strip(".,;:!?\"'()[]") if len(w.strip(".,;:!?\"'()[]")) > 0 else w for w in raw.split()]
+        words = [w for w in words if w]
         if not words:
             continue
         s0 = float(seg.get("start", 0.0))
@@ -476,7 +477,7 @@ def _chunk_words_into_timeline(
         total_w = max(1, sum(weights))
         cur = s0
         for g, wt in zip(groups, weights, strict=True):
-            dur = max(0.28, span * (wt / total_w))
+            dur = max(0.24, span * (wt / total_w))
             label = " ".join(g)
             chunks.append({
                 "text": label.upper() if uppercase else label,
@@ -484,7 +485,11 @@ def _chunk_words_into_timeline(
                 "duration_s": round(dur, 2),
             })
             cur += dur
-    return chunks
+    for i in range(len(chunks) - 1):
+        nxt_start = chunks[i + 1]["start_s"]
+        if chunks[i]["start_s"] + chunks[i]["duration_s"] > nxt_start - 0.02:
+            chunks[i]["duration_s"] = round(max(0.18, nxt_start - chunks[i]["start_s"] - 0.02), 2)
+    return [c for c in chunks if c["duration_s"] >= 0.18]
 
 
 def _transcribe_clip_segments(ctx: ToolContext, clip: ClipInfo, *, uppercase: bool = False) -> list[dict[str, Any]]:
@@ -512,23 +517,34 @@ def _transcribe_clip_segments(ctx: ToolContext, clip: ClipInfo, *, uppercase: bo
         plain_text = ""
 
         local_whisper = getattr(stt, "local", None) if stt is not None else None
+        created_local = None
         if local_whisper is None and stt is not None and hasattr(stt, "transcribe"):
             local_whisper = stt
-        if local_whisper is not None and hasattr(local_whisper, "transcribe") and stt is not None:
+        if local_whisper is None:
             from ..speech import local_stt
 
-            settings = getattr(ctx.services, "settings", None)
-            mname = getattr(settings, "local_stt_model", "base-q5_1") if settings else "base-q5_1"
-            lang = getattr(settings, "language", "it") if settings else "it"
-            if not local_stt.is_downloaded(mname):
-                for cand in ("small-q5_1", "base-q5_1", "tiny-q5_1"):
-                    if local_stt.is_downloaded(cand):
-                        mname = cand
-                        break
-            if local_stt.is_downloaded(mname):
-                payload = local_whisper.transcribe(pcm, name=mname, language=lang, prompt="")
-                segments = [s for s in (payload.get("segments") or []) if str(s.get("text") or "").strip()]
-                plain_text = str(payload.get("text") or "")
+            if any(local_stt.is_downloaded(cand) for cand in ("small-q5_1", "base-q5_1", "tiny-q5_1")):
+                created_local = local_stt.LocalWhisper()
+                local_whisper = created_local
+        try:
+            if local_whisper is not None and hasattr(local_whisper, "transcribe"):
+                from ..speech import local_stt
+
+                settings = getattr(ctx.services, "settings", None)
+                mname = getattr(settings, "local_stt_model", "base-q5_1") if settings else "base-q5_1"
+                lang = getattr(settings, "language", "it") if settings else "it"
+                if not local_stt.is_downloaded(mname):
+                    for cand in ("small-q5_1", "base-q5_1", "tiny-q5_1"):
+                        if local_stt.is_downloaded(cand):
+                            mname = cand
+                            break
+                if local_stt.is_downloaded(mname):
+                    payload = local_whisper.transcribe(pcm, name=mname, language=lang, prompt="")
+                    segments = [s for s in (payload.get("segments") or []) if str(s.get("text") or "").strip()]
+                    plain_text = str(payload.get("text") or "")
+        finally:
+            if created_local is not None:
+                created_local.release()
 
         if not segments and stt is not None:
             if hasattr(stt, "transcribe_pcm"):
@@ -541,7 +557,7 @@ def _transcribe_clip_segments(ctx: ToolContext, clip: ClipInfo, *, uppercase: bo
             v0, v1 = _voiced_span(pcm, 16000)
             segments = [{"text": plain_text.strip(), "start": v0, "end": max(v0 + 1.0, v1)}]
 
-        return _chunk_words_into_timeline(segments, uppercase=uppercase, max_words_per_chunk=2)[:42]
+        return _chunk_words_into_timeline(segments, uppercase=uppercase, max_words_per_chunk=2)[:48]
     except Exception:
         log.debug("video STT phrase extraction skipped", exc_info=True)
         return []
@@ -785,22 +801,19 @@ def _render_cutaway_slide(
     variant: str = "warp_grid",
 ) -> None:
     w, h = size
-    canvas = Image.new("RGBA", (w, h), (242, 244, 249, 255))
-    draw = ImageDraw.Draw(canvas)
+    canvas = Image.new("RGBA", (w, h), (238, 242, 248, 255))
 
-    vignette = Image.new("RGBA", (w, h), (150, 156, 172, 130))
+    vignette = Image.new("RGBA", (w, h), (156, 166, 186, 125))
     vd = ImageDraw.Draw(vignette)
-    vd.ellipse([-int(w * 0.15), int(h * 0.08), int(w * 1.15), int(h * 0.92)], fill=(250, 251, 255, 255))
+    vd.ellipse([-int(w * 0.14), int(h * 0.08), int(w * 1.14), int(h * 0.90)], fill=(252, 253, 255, 255))
     vignette = vignette.filter(ImageFilter.GaussianBlur(radius=max(45, w // 9)))
     canvas = Image.alpha_composite(canvas, vignette)
-    draw = ImageDraw.Draw(canvas)
 
     if variant == "warp_grid":
         grid = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         gd = ImageDraw.Draw(grid)
-        cols = 14
-        rows = 24
-        cx, cy = w * 0.5, h * 0.48
+        cols, rows = 14, 24
+        cx, cy = w * 0.5, h * 0.46
         for i in range(-1, cols + 2):
             pts: list[tuple[float, float]] = []
             bx = (i / cols) * w
@@ -810,7 +823,7 @@ def _render_cutaway_slide(
                 dy = (py - cy) / max(1.0, h * 0.5)
                 bow = 1.0 + 0.14 * (1.0 - dy * dy)
                 pts.append((cx + dx * (w * 0.5) * bow, py))
-            gd.line(pts, fill=(182, 190, 208, 120), width=2)
+            gd.line(pts, fill=(176, 186, 206, 125), width=2)
         for j in range(-1, rows + 2):
             pts = []
             by = (j / rows) * h
@@ -820,38 +833,61 @@ def _render_cutaway_slide(
                 dy = (by - cy) / max(1.0, h * 0.5)
                 bow = 1.0 + 0.12 * (1.0 - dx * dx)
                 pts.append((px, cy + dy * (h * 0.5) * bow))
-            gd.line(pts, fill=(182, 190, 208, 120), width=2)
+            gd.line(pts, fill=(176, 186, 206, 125), width=2)
         canvas = Image.alpha_composite(canvas, grid)
+
+        card_w = int(w * 0.72)
+        card_h = int(card_w * 0.66)
+        x0, y0 = (w - card_w) // 2, int(h * 0.31)
+        x1, y1 = x0 + card_w, y0 + card_h
+
+        shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).rounded_rectangle(
+            [x0 + 8, y0 + 22, x1 + 8, y1 + 26], radius=34, fill=(18, 24, 42, 95)
+        )
+        canvas = Image.alpha_composite(canvas, shadow.filter(ImageFilter.GaussianBlur(radius=22)))
         draw = ImageDraw.Draw(canvas)
 
-        card_sz = max(170, int(w * 0.34))
-        cx_i, cy_i = w // 2, int(h * 0.44)
-        shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(shadow)
-        sd.rounded_rectangle([cx_i - card_sz // 2, cy_i - card_sz // 2 + 16, cx_i + card_sz // 2, cy_i + card_sz // 2 + 16], radius=32, fill=(20, 24, 38, 120))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=18))
-        canvas = Image.alpha_composite(canvas, shadow)
-        draw = ImageDraw.Draw(canvas)
         draw.rounded_rectangle(
-            [cx_i - card_sz // 2, cy_i - card_sz // 2, cx_i + card_sz // 2, cy_i + card_sz // 2],
-            radius=32,
-            fill=(24, 26, 34, 245),
-            outline=(157, 107, 255, 220),
+            [x0, y0, x1, y1], radius=32, fill=(20, 23, 32, 250), outline=(72, 232, 255, 190), width=3
+        )
+        bar_h = max(44, int(card_h * 0.16))
+        draw.rounded_rectangle([x0, y0, x1, y0 + bar_h + 12], radius=32, fill=(30, 35, 48, 255))
+        draw.rectangle([x0, y0 + bar_h - 6, x1, y0 + bar_h + 12], fill=(30, 35, 48, 255))
+        for di, col in enumerate(((255, 95, 87, 255), (254, 188, 46, 255), (40, 200, 64, 255))):
+            dx_c = x0 + 28 + di * 22
+            dy_c = y0 + bar_h // 2
+            draw.ellipse([dx_c - 6, dy_c - 6, dx_c + 6, dy_c + 6], fill=col)
+
+        em_r = max(42, int(card_h * 0.22))
+        em_cx, em_cy = x0 + int(card_w * 0.24), y0 + bar_h + int((card_h - bar_h) * 0.50)
+        draw.ellipse(
+            [em_cx - em_r, em_cy - em_r, em_cx + em_r, em_cy + em_r],
+            fill=(26, 36, 52, 255),
+            outline=(77, 240, 181, 255),
             width=4,
         )
-        _draw_vector_icon(draw, icon_kind, cx_i, cy_i, card_sz // 3, (77, 240, 181, 255))
+        _draw_vector_icon(draw, icon_kind, em_cx, em_cy, int(em_r * 0.55), (77, 240, 181, 255))
+
+        tx_b = em_cx + em_r + 28
+        f_card = _load_font(max(30, int(w * 0.044)))
+        draw.text((tx_b, em_cy - 34), keyword.strip()[:16].upper(), font=f_card, fill=(255, 255, 255, 255))
+        bar_w1 = max(60, x1 - tx_b - 36)
+        draw.rounded_rectangle([tx_b, em_cy + 14, tx_b + bar_w1, em_cy + 28], radius=7, fill=(60, 235, 255, 200))
+        draw.rounded_rectangle([tx_b, em_cy + 40, tx_b + int(bar_w1 * 0.68), em_cy + 52], radius=6, fill=(130, 145, 170, 150))
     else:
-        f_big = max(62, int(w * 0.11))
+        draw = ImageDraw.Draw(canvas)
+        f_big = max(64, int(w * 0.115))
         font = _load_font(f_big)
-        text = keyword.strip()
+        text = keyword.strip().upper()
         b = draw.textbbox((0, 0), text, font=font)
         tw, th = b[2] - b[0], b[3] - b[1]
-        tx, ty = (w - tw) // 2, (h - th) // 2 - th // 6
+        tx, ty = (w - tw) // 2, int(h * 0.43) - th // 2
         glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
-        gd.text((tx - 4, ty), text, font=font, fill=(0, 220, 255, 190))
-        gd.text((tx + 4, ty), text, font=font, fill=(255, 70, 95, 190))
-        glow = glow.filter(ImageFilter.GaussianBlur(radius=3))
+        gd.text((tx - 5, ty), text, font=font, fill=(0, 220, 255, 195))
+        gd.text((tx + 5, ty), text, font=font, fill=(255, 70, 95, 195))
+        glow = glow.filter(ImageFilter.GaussianBlur(radius=4))
         canvas = Image.alpha_composite(canvas, glow)
         draw = ImageDraw.Draw(canvas)
         draw.text((tx, ty), text, font=font, fill=(14, 16, 22, 255))
@@ -862,17 +898,17 @@ def _render_cutaway_slide(
 def _render_floating_badge(dst: Path, label: str, icon_kind: str, size: tuple[int, int]) -> None:
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    rad = max(58, int(w * 0.12))
-    cx, cy = w // 2, int(h * 0.56)
+    rad = max(54, int(w * 0.11))
+    cx, cy = w // 2, int(h * 0.25)
 
     glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse([cx - rad - 10, cy - rad - 10, cx + rad + 10, cy + rad + 10], fill=(77, 240, 181, 140))
+    gd.ellipse([cx - rad - 12, cy - rad - 12, cx + rad + 12, cy + rad + 12], fill=(60, 235, 255, 145))
     glow = glow.filter(ImageFilter.GaussianBlur(radius=18))
     img = Image.alpha_composite(img, glow)
     draw = ImageDraw.Draw(img)
 
-    draw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=(18, 22, 30, 240), outline=(77, 240, 181, 255), width=5)
+    draw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=(18, 22, 32, 242), outline=(60, 235, 255, 255), width=5)
     _draw_vector_icon(draw, icon_kind, cx, cy, int(rad * 0.58), (77, 240, 181, 255))
     img.save(dst, "PNG")
 
@@ -1107,25 +1143,38 @@ def _render_phrase_card(dst: Path, phrase: dict[str, Any], size: tuple[int, int]
         return
 
     if mode == "word":
-        fsize = max(48, int(w * 0.068))
+        fsize = max(50, int(w * 0.072))
         font = _load_font(fsize)
         lines = _wrap_text(phrase["text"], font, draw, int(w * 0.84))
-        fg_rgba = _hex_to_rgba(phrase["color"])
+        accent_rgba = _hex_to_rgba(phrase["color"])
+        if accent_rgba[:3] == (255, 255, 255):
+            accent_rgba = (60, 235, 255, 255)
         glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
-        cur_y = int(h * 0.73) - (len(lines) * fsize) // 2
-        positions: list[tuple[str, int, int]] = []
+        cur_y = int(h * 0.74) - (len(lines) * fsize) // 2
+        tokens_all = phrase["text"].split()
+        hero_idx = (len(tokens_all) - 1) if len(tokens_all) > 1 else 0
+        line_layouts: list[tuple[list[tuple[str, int, tuple[int, int, int, int]]], int]] = []
+        tok_cursor = 0
         for ln in lines[:2]:
-            b = draw.textbbox((0, 0), ln, font=font)
-            tw = b[2] - b[0]
-            tx = (w - tw) // 2
-            gd.text((tx, cur_y + 5), ln, font=font, fill=(0, 0, 0, 210))
-            positions.append((ln, tx, cur_y))
+            ln_words = ln.split()
+            widths = [draw.textbbox((0, 0), wd + " ", font=font)[2] - draw.textbbox((0, 0), wd + " ", font=font)[0] for wd in ln_words]
+            total_w = sum(widths)
+            cx_w = (w - total_w) // 2
+            row_items: list[tuple[str, int, tuple[int, int, int, int]]] = []
+            for wd, ww in zip(ln_words, widths, strict=True):
+                col = accent_rgba if tok_cursor == hero_idx else (255, 255, 255, 255)
+                gd.text((cx_w, cur_y + 5), wd, font=font, fill=(0, 0, 0, 220))
+                row_items.append((wd, cx_w, col))
+                cx_w += ww
+                tok_cursor += 1
+            line_layouts.append((row_items, cur_y))
             cur_y += int(fsize * 1.18)
         img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(radius=10)))
         draw = ImageDraw.Draw(img)
-        for ln, tx, ty in positions:
-            draw.text((tx, ty), ln, font=font, fill=fg_rgba, stroke_width=6, stroke_fill=(10, 11, 15, 250))
+        for row_items, ty in line_layouts:
+            for wd, tx, col in row_items:
+                draw.text((tx, ty), wd, font=font, fill=col, stroke_width=6, stroke_fill=(10, 11, 15, 250))
         img.save(dst, "PNG")
         return
 
@@ -1836,7 +1885,7 @@ def _build_ffmpeg_cmd(
     overlay_items: list[tuple[dict[str, Any], Path, bool]] = [
         *[(item, p, True) for item, p in broll_pngs if p.is_file()],
         *[(item, p, False) for item, p in badge_pngs if p.is_file()],
-        *[(ph, p, False) for ph, p in phrase_pngs[:28] if p.is_file()],
+        *[(ph, p, False) for ph, p in phrase_pngs[:48] if p.is_file()],
     ]
     overlay_start_idx = clip_base_idx + len(clips)
     for _item, png, _is_slide in overlay_items:
@@ -1923,8 +1972,14 @@ def _build_ffmpeg_cmd(
         nxt = f"[comp{idx + 1}]"
         s_t = max(0.0, min(float(item["start_s"]), max(0.0, eff_total_s - 0.15)))
         e_t = min(eff_total_s, s_t + max(0.20, float(item["duration_s"])))
+        if _is_slide:
+            y_expr = f"if(lt(t-{s_t:.2f},0.16),H*0.12*(1-(t-{s_t:.2f})/0.16)*(1-(t-{s_t:.2f})/0.16),0)"
+        elif "icon" in item and not item.get("is_hook"):
+            y_expr = f"if(lt(t-{s_t:.2f},0.20),-H*0.06*(1-(t-{s_t:.2f})/0.20),10*sin((t-{s_t:.2f})*5))"
+        else:
+            y_expr = f"if(lt(t-{s_t:.2f},0.09),18*(1-(t-{s_t:.2f})/0.09),0)"
         filters.append(
-            f"{prev}[{overlay_start_idx + idx}:v]overlay=0:0:repeatlast=1:enable='between(t,{s_t:.2f},{e_t:.2f})'{nxt}"
+            f"{prev}[{overlay_start_idx + idx}:v]overlay=x=0:y='{y_expr}':repeatlast=1:enable='between(t,{s_t:.2f},{e_t:.2f})'{nxt}"
         )
         prev = nxt
     fade_out_st = max(0.0, eff_total_s - 0.35)
@@ -2613,8 +2668,8 @@ def edit_video(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "edit_video",
-        "Edita video live stile TikTok/Reels con Studio (CapCut/DaVinci, sottotitoli sync, B-Roll 3D, SFX, MP4). "
-        "Vuoto apre upload: mai inventare file.",
+        "Edita video live stile TikTok/Reels (CapCut/DaVinci, sottotitoli automatici dal parlato, B-Roll 3D, SFX, MP4). "
+        "Vuoto apre upload: non inventare file o phrases.",
         params(
             {
                 "editor": {"type": "string", "enum": ["auto", "capcut", "davinci"]},

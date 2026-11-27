@@ -94,6 +94,16 @@ class StreamResampler:
 
 def prepare_for_stt(pcm: np.ndarray, rate: int) -> np.ndarray:
     samples = np.asarray(pcm, dtype=np.int16)
+    if samples.size == 0:
+        return samples
+    arr = samples.astype(np.float32)
+    arr -= float(np.mean(arr))
+    win = max(3, int(rate / 80))
+    if arr.size > win * 2:
+        kernel = np.ones(win, dtype=np.float32) / float(win)
+        arr = arr - np.convolve(arr, kernel, mode="same")
+    samples = np.clip(arr, -32768.0, 32767.0).astype(np.int16)
+
     frame = max(1, int(rate * 0.03))
     count = samples.size // frame
     if count < 3:
@@ -101,16 +111,32 @@ def prepare_for_stt(pcm: np.ndarray, rate: int) -> np.ndarray:
     blocks = samples[: count * frame].astype(np.float32).reshape(count, frame)
     rms = np.sqrt(np.mean(blocks * blocks, axis=1)) + 1e-9
     db = 20 * np.log10(rms / 32768.0)
-    ref_db = min(-15.0, float(np.percentile(db, 95)))
-    loud = np.flatnonzero(db > max(-55.0, ref_db - 35.0))
+    ref_db = min(-15.0, float(np.percentile(db, 92)))
+    loud = np.flatnonzero(db > max(-56.0, ref_db - 36.0))
     if loud.size:
-        margin = int(0.3 / 0.03)
+        margin = int(0.35 / 0.03)
         first = max(0, loud[0] - margin)
         last = min(count, loud[-1] + margin + 1)
         samples = samples[first * frame : last * frame] if last * frame <= samples.size else samples[first * frame :]
-    peak = float(np.abs(samples.astype(np.int32)).max()) if samples.size else 0.0
-    if 0 < peak < 23000:
-        gain = min(8.0, 23000.0 / peak)
-        samples = np.clip(samples.astype(np.float32) * gain, -32768, 32767).astype(np.int16)
-    tail = np.zeros(int(rate * 0.3), dtype=np.int16)
-    return np.concatenate([samples, tail])
+
+    if samples.size:
+        s_float = samples.astype(np.float32)
+        f_count = s_float.size // frame
+        if f_count >= 1:
+            f_blocks = s_float[: f_count * frame].reshape(f_count, frame)
+            speech_level = float(np.percentile(np.max(np.abs(f_blocks), axis=1), 95))
+        else:
+            speech_level = float(np.abs(s_float).max())
+        if 0 < speech_level < 20000.0:
+            gain = min(10.0, 20000.0 / speech_level)
+            s_float = s_float * gain
+            over = np.abs(s_float) > 26000.0
+            if np.any(over):
+                s_float[over] = np.sign(s_float[over]) * (
+                    26000.0 + 6000.0 * np.tanh((np.abs(s_float[over]) - 26000.0) / 8000.0)
+                )
+            samples = np.clip(s_float, -32767.0, 32767.0).astype(np.int16)
+
+    head = np.zeros(int(rate * 0.16), dtype=np.int16)
+    tail = np.zeros(int(rate * 0.32), dtype=np.int16)
+    return np.concatenate([head, samples, tail])

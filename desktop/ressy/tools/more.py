@@ -680,7 +680,7 @@ def run_powershell(ctx: ToolContext, args: dict) -> str:
     log.info("powershell: %d characters", len(command))
     try:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
              "[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + command],
             capture_output=True,
             timeout=120,

@@ -49,7 +49,7 @@ VOICE = Channel("voice")
 PTT_MAX_S = 60.0
 MIN_PTT_SECONDS = 0.35
 PREROLL_FRAMES = 50
-PREROLL_LEAD_S = 0.15
+PREROLL_LEAD_S = 0.28
 WARM_MIC_S = 2.5
 REMOTE_TIMEOUT_S = 140.0
 VOICE_TIMEOUT_S = 300.0
@@ -72,6 +72,7 @@ TOOL_STATUS = {
     "window_action": tr("Sistemo la finestra…"),
     "send_discord_message": tr("Scrivo su Discord…"),
     "read_discord_chat": tr("Leggo Discord…"),
+    "call_phone": tr("Avvio la chiamata…"),
     "open_url": tr("Apro il browser…"),
     "web_search": tr("Cerco sul web…"),
     "read_webpage": tr("Leggo la pagina web…"),
@@ -822,12 +823,34 @@ class Controller:
         if late:
             text += tr(" (in ritardo: il PC era spento o in sospensione)")
         self.ui.toast(title, reminder.text)
+        if getattr(reminder, "call", False):
+            from ..tools import calls
+            from ..tools.registry import ToolContext
+
+            plat = getattr(reminder, "call_platform", "") or reminder.platform or "auto"
+            ctx = ToolContext(channel=VOICE, services=self.services)
+            try:
+                await asyncio.to_thread(
+                    calls.call_phone,
+                    ctx,
+                    {
+                        "platform": plat,
+                        "recipient": getattr(reminder, "call_target", ""),
+                        "reason": text,
+                    },
+                )
+            except Exception:
+                log.warning("reminder call escalation failed", exc_info=True)
         if reminder.platform:
+            voice = await self.speaker.voice_note(text) if getattr(self.speaker, "voice_note", None) else None
             delivered = await self.remote.notify(
-                "⏰ " + text, target={"platform": reminder.platform, "user_id": reminder.user_id}
+                "⏰ " + text, voice=voice, target={"platform": reminder.platform, "user_id": reminder.user_id}
             )
             if delivered:
                 return
+        elif getattr(self.remote, "links", None):
+            voice = await self.speaker.voice_note(text) if getattr(self.speaker, "voice_note", None) else None
+            await self.remote.notify("⏰ " + text, voice=voice)
         self._enqueue(AnnounceJob(text))
 
     async def _handle_scheduled(self, job: ScheduledJob) -> None:

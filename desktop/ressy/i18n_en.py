@@ -2105,4 +2105,42 @@ EN: dict[str, str] = {
         'You already tried this exact call and it failed: change the arguments/tool or ask the user.',
     'A chi devo scrivere su Discord?':
         'Who should I write to on Discord?',
+    'Avvio la chiamata…':
+        'Starting the call…',
+    'Le chiamate tramite Telegram Desktop sono supportate su Windows.':
+        'Calls via Telegram Desktop are supported on Windows.',
+    'Telegram Desktop non sembra installato o aperto su questo PC.':
+        'Telegram Desktop does not appear to be installed or open on this PC.',
+    'Ho aperto la chat Discord con {target}, ma non trovo il pulsante «Avvia chiamata vocale». Verifica che sia una chat privata (DM).':
+        'I opened the Discord chat with {target}, but I cannot find the «Start Voice Call» button. Make sure it is a direct message (DM).',
+    'corrente':
+        'current',
+    'Sto chiamando {target} su Discord!':
+        'Calling {target} on Discord!',
+    'Ho aperto la chat Telegram con {target}, ma non trovo il pulsante «Chiama» nella barra in alto.':
+        'I opened the Telegram chat with {target}, but I cannot find the «Call» button in the top bar.',
+    'Sto chiamando {target} su Telegram!':
+        'Calling {target} on Telegram!',
+    'Dimmi il contatto o @username Telegram da chiamare (puoi anche salvarlo in Impostazioni › Da remoto).':
+        'Tell me the Telegram contact or @username to call (you can also save it in Settings › Remote).',
+    'Dimmi il nome Discord da chiamare (puoi anche salvarlo in Impostazioni › Da remoto).':
+        'Tell me the Discord name to call (you can also save it in Settings › Remote).',
+    'Chiamata da Ressy sul tuo PC!':
+        'Call from Ressy on your PC!',
+    'Ti ho inviato anche un avviso vocale sul telefono.':
+        'I also sent a voice alert to your phone.',
+    'Non sono riuscita a far partire la chiamata desktop ({err}), ma ti ho inviato subito un avviso vocale su {plat}.':
+        'I could not start the desktop call ({err}), but I sent a voice alert right away on {plat}.',
+    'Non sono riuscita ad avviare la chiamata.':
+        'I could not start the call.',
+    'Promemoria con chiamata su {plat} impostato {when}: {text}.':
+        'Reminder with a call on {plat} set {when}: {text}.',
+    'es. nomeutente (opzionale, per chiamate)':
+        'e.g. username (optional, for calls)',
+    'Contatto Discord per chiamate':
+        'Discord contact for calls',
+    'es. @nomeutente (opzionale, per chiamate)':
+        'e.g. @username (optional, for calls)',
+    'Contatto Telegram per chiamate':
+        'Telegram contact for calls',
 }

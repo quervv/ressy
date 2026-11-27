@@ -56,13 +56,60 @@ def make_icon() -> Path:
     return icon
 
 
+def make_version_file(name: str, original_filename: str, description: str) -> Path:
+    sys.path.insert(0, str(DESKTOP))
+    from ressy import __version__
+
+    parts = [int(p) for p in __version__.split(".")[:3] if p.isdigit()]
+    while len(parts) < 4:
+        parts.append(0)
+    ver_tuple = f"({parts[0]}, {parts[1]}, {parts[2]}, {parts[3]})"
+    ver_str = ".".join(str(p) for p in parts)
+    BUILD.mkdir(parents=True, exist_ok=True)
+    out = BUILD / f"version_{name.lower().replace('-', '_')}.txt"
+    out.write_text(
+        f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={ver_tuple},
+    prodvers={ver_tuple},
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [StringStruct('CompanyName', 'Ressy Project (quervv/ressy)'),
+         StringStruct('FileDescription', {description!r}),
+         StringStruct('FileVersion', {ver_str!r}),
+         StringStruct('InternalName', {name!r}),
+         StringStruct('LegalCopyright', 'MIT License - Ressy Project'),
+         StringStruct('OriginalFilename', {original_filename!r}),
+         StringStruct('ProductName', 'Ressy'),
+         StringStruct('ProductVersion', {ver_str!r})])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+""",
+        encoding="utf-8",
+    )
+    return out
+
+
 def pyinstaller(icon: Path) -> Path:
     sep = os.pathsep
+    ver_file = make_version_file("Ressy", "Ressy.exe", "Ressy - Assistente Vocale AI")
     args = [
         sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean", "--windowed",
+        "--noconfirm", "--clean", "--noupx", "--windowed",
         "--name", "Ressy",
         "--icon", str(icon),
+        "--version-file", str(ver_file),
         "--workpath", str(BUILD / "pyinstaller"),
         "--distpath", str(DIST),
         "--specpath", str(BUILD),
@@ -87,11 +134,13 @@ def pyinstaller(icon: Path) -> Path:
 
 def setup_exe(icon: Path, payload: Path, out: Path) -> Path:
     sep = os.pathsep
+    ver_file = make_version_file("Ressy-Setup", "Ressy-Setup.exe", "Programma di installazione di Ressy")
     args = [
         sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean", "--windowed", "--onefile",
+        "--noconfirm", "--clean", "--noupx", "--windowed", "--onefile",
         "--name", "Ressy-Setup",
         "--icon", str(icon),
+        "--version-file", str(ver_file),
         "--workpath", str(BUILD / "pyinstaller-setup"),
         "--distpath", str(DIST),
         "--specpath", str(BUILD),

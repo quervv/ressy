@@ -743,3 +743,78 @@ def test_discord_anti_screenshot_loop_quick_paths_and_router_fixes(monkeypatch, 
     asyncio.run(router.chat([{"role": "user", "content": "ciao"}], models=["qwen2.5-1.5b"]))
     assert "qwen2.5-1.5b" not in seen_groq_models
     assert seen_groq_models[0] == settings.llm_model
+
+
+def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, monkeypatch):
+    import numpy as np
+    from ressy import install
+    from ressy.audio import pcm as audio_pcm
+    from ressy.brain import quick
+    from ressy.speech import local_stt, tts
+    from ressy.tools import calls, reminders
+
+    srv = local_llm.LlamaServer()
+    srv.port, srv.key = 4321, "k"
+    cmd = srv.command(local_llm.model_path("qwen2.5-1.5b"))
+    assert "-ctk" in cmd and "q8_0" in cmd
+    assert "-ctv" in cmd and "--no-warmup" in cmd
+    assert cmd[cmd.index("-c") + 1] == "2048"
+    assert local_llm.IDLE_STOP_S <= 180
+
+    lw = local_stt.LocalWhisper()
+    lw._model = object()
+    lw._name = "base-q5_1"
+    lw.release()
+    assert lw._model is None and lw._name == ""
+
+    tts_src = (Path(__file__).resolve().parents[1] / "ressy" / "speech" / "tts.py").read_text(encoding="utf-8")
+    inst_src = (Path(__file__).resolve().parents[1] / "ressy" / "install.py").read_text(encoding="utf-8")
+    build_src = (Path(__file__).resolve().parents[1] / "scripts" / "build_release.py").read_text(encoding="utf-8")
+    assert "-EncodedCommand" not in tts_src
+    assert "-ExecutionPolicy" not in tts_src
+    assert "-ExecutionPolicy" not in inst_src
+    assert "Remove-Item" not in inst_src
+    assert "--noupx" in build_src and "--version-file" in build_src
+
+    if os.name == "nt":
+        lnk = tmp_path / "RessyTest.lnk"
+        install.create_shortcut(lnk, Path(os.sys.executable), args="--help", description="Test")
+        assert lnk.is_file() and lnk.stat().st_size > 100
+
+    t = np.arange(16000)
+    quiet_dc = (2400 + np.sin(t / 5.0) * 900).astype(np.int16)
+    out = audio_pcm.prepare_for_stt(quiet_dc, 16000)
+    assert out.size >= 16000 + int(16000 * 0.4)
+    assert abs(float(np.mean(out))) < 200.0
+    assert np.abs(out).max() > 8000
+
+    q1 = quick.match("chiamami su telegram per l'appuntamento")
+    assert q1 is not None and q1.tool == "call_phone" and q1.args["platform"] == "telegram"
+    q2 = quick.match("chiama Marco su discord")
+    assert q2 is not None and q2.tool == "call_phone" and q2.args["recipient"] == "Marco"
+
+    called: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(calls, "_call_via_telegram", lambda _c, tgt: called.append(("telegram", tgt, "")) or f"Chiamo {tgt}!")
+    ctx = ToolContext(channel=VOICE, services=SimpleNamespace(settings=settings, remote=None, speaker=None))
+    res = calls.call_phone(ctx, {"platform": "telegram", "recipient": "@marco_test", "reason": "Appuntamento"})
+    assert "Chiamo @marco_test" in res and called == [("telegram", "@marco_test", "")]
+
+    rem_svc = reminders.ReminderService(tmp_path / "rem.json", lambda *_a: None)
+
+    async def _add_rem():
+        rem_svc.start()
+        try:
+            return rem_svc.add("Dentista", 9999999999.0, call=True, call_platform="discord", call_target="Beffa")
+        finally:
+            rem_svc.stop()
+
+    r = asyncio.run(_add_rem())
+    assert r.call and r.call_platform == "discord" and r.call_target == "Beffa"
+
+    chunks = video._chunk_words_into_timeline(
+        [{"text": "ecco come funziona", "start": 0.0, "end": 1.2}, {"text": "guarda questo risultato", "start": 1.1, "end": 2.4}],
+        uppercase=False,
+        max_words_per_chunk=2,
+    )
+    assert all(chunks[i]["start_s"] + chunks[i]["duration_s"] <= chunks[i + 1]["start_s"] + 1e-6 for i in range(len(chunks) - 1))
+

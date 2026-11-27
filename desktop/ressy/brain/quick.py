@@ -271,6 +271,25 @@ def match(text: str) -> Quick | None:
     if math_ans:
         return Quick(answer=math_ans)
 
+    call_me = re.fullmatch(
+        r"(?:chiamami|fammi una chiamata|telefonami)(?:\s+su\s+(discord|telegram))?(?:\s+(?:per|a causa di|riguardo)\s+(.+))?",
+        t_no_colon,
+    )
+    if call_me:
+        args_c: dict[str, Any] = {"platform": call_me.group(1) or "auto"}
+        if call_me.group(2):
+            args_c["reason"] = _as_said(raw, call_me.group(2).strip())
+        return Quick("call_phone", args_c)
+    call_who = re.fullmatch(
+        r"(?:chiama|telefona a)\s+(.+?)\s+su\s+(discord|telegram)(?:\s+(?:per|riguardo)\s+(.+))?",
+        t_no_colon,
+    )
+    if call_who:
+        args_c = {"recipient": _preserve_case(raw, call_who.group(1).strip()), "platform": call_who.group(2)}
+        if call_who.group(3):
+            args_c["reason"] = _as_said(raw, call_who.group(3).strip())
+        return Quick("call_phone", args_c)
+
     if re.fullmatch(r"(?:quali promemoria ho|leggi i promemoria|lista promemoria|what reminders do i have|list reminders)", t_no_colon):
         return Quick("reminder", {"action": "list"})
     reminder = _REMINDER.fullmatch(t_no_colon)

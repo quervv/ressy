@@ -429,7 +429,7 @@ def _wmi_brightness(level: int | None = None, delta: int = 0) -> int:
             "Write-Output $next"
         )
     res = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
         capture_output=True, timeout=10, creationflags=CREATE_NO_WINDOW,
     )
     if res.returncode != 0:

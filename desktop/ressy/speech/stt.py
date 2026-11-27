@@ -169,13 +169,13 @@ class SpeechToText:
     def _prompt(self) -> str:
         if self.settings.language == "en":
             base = (
-                "Ressy, wake up! Hi Ressy, open Discord, Spotify, CapCut, DaVinci Resolve or time.is, "
-                "edit a video, send a message on Discord, create a folder, search on Google."
+                "Ressy, wake up! Hi Ressy, open Discord, Telegram, Spotify, CapCut, DaVinci Resolve or time.is, "
+                "call me on Discord or Telegram, set a reminder or appointment, edit a video, send a message on Discord."
             )
         else:
             base = (
-                "Ressy, sveglia! Ciao Ressy, apri Discord, Spotify, CapCut, DaVinci Resolve, WhatsApp o time.is, "
-                "edita un video, scrivi su Discord, crea cartella, metti su YouTube. Che meteo c'è?"
+                "Ressy, sveglia! Ciao Ressy, apri Discord, Telegram, Spotify, CapCut, DaVinci Resolve, WhatsApp o time.is, "
+                "chiamami su Discord o su Telegram, ricorda l'appuntamento, edita un video, scrivi su Discord. Che meteo c'è?"
             )
         names: list[str] = []
         if self.settings.user_name:

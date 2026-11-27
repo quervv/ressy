@@ -97,12 +97,37 @@ def delete_other_models(keep: str) -> None:
             model_path(name).unlink(missing_ok=True)
 
 
+IDLE_UNLOAD_S = 180.0
+
+
 class LocalWhisper:
 
     def __init__(self) -> None:
         self._model: Any = None
         self._name = ""
         self._lock = threading.Lock()
+        self._idle_timer: threading.Timer | None = None
+
+    def _schedule_unload_locked(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+        timer = threading.Timer(IDLE_UNLOAD_S, self.release)
+        timer.daemon = True
+        timer.start()
+        self._idle_timer = timer
+
+    def release(self) -> None:
+        import gc
+
+        with self._lock:
+            if self._idle_timer is not None:
+                self._idle_timer.cancel()
+                self._idle_timer = None
+            if self._model is not None:
+                self._model = None
+                self._name = ""
+                gc.collect()
+                log.info("speech model unloaded to free RAM")
 
     def _load(self, name: str) -> Any:
         if self._model is not None and self._name == name:
@@ -114,7 +139,7 @@ class LocalWhisper:
         self._model = None
         self._model = Model(
             str(model_path(name)),
-            n_threads=max(2, min(8, (os.cpu_count() or 4) - 1)),
+            n_threads=max(2, min(6, (os.cpu_count() or 4) - 1)),
             print_progress=False,
             print_realtime=False,
             print_timestamps=False,
@@ -127,6 +152,7 @@ class LocalWhisper:
     def preload(self, name: str) -> None:
         with self._lock:
             self._load(name)
+            self._schedule_unload_locked()
 
     def transcribe(self, audio: np.ndarray, *, name: str, language: str, prompt: str) -> dict[str, Any]:
         import numpy as np
@@ -140,7 +166,11 @@ class LocalWhisper:
                 extract_probability=True,
                 no_context=True,
                 single_segment=False,
+                suppress_blank=True,
+                no_speech_thold=0.55,
+                beam_search={"beam_size": 2},
             )
+            self._schedule_unload_locked()
         out = []
         for seg in segments:
             text = str(seg.text or "").strip()

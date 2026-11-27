@@ -31,6 +31,9 @@ class Reminder:
     user_id: str = ""
     kind: str = "reminder"
     command: str = ""
+    call: bool = False
+    call_platform: str = ""
+    call_target: str = ""
 
     def when(self) -> str:
         due = dt.datetime.fromtimestamp(self.due)
@@ -122,8 +125,12 @@ class ReminderService:
     def add(
         self, text: str, due: float, platform: str = "", user_id: str = "",
         *, kind: str = "reminder", command: str = "",
+        call: bool = False, call_platform: str = "", call_target: str = "",
     ) -> Reminder:
-        reminder = Reminder(secrets.token_hex(2), due, text.strip(), platform, user_id, kind, command.strip())
+        reminder = Reminder(
+            secrets.token_hex(2), due, text.strip(), platform, user_id, kind, command.strip(),
+            bool(call), call_platform.strip().lower(), call_target.strip(),
+        )
         while reminder.id in self._items:
             reminder.id = secrets.token_hex(2)
         self._items[reminder.id] = reminder
@@ -184,7 +191,18 @@ async def reminder_tool(ctx: ToolContext, args: dict) -> str:
             raise ToolError(tr("Cosa devo ricordarti?"))
         due = parse_due(args.get("minutes"), args.get("at"))
         channel = ctx.channel
-        reminder = service.add(text, due, channel.kind if channel.remote else "", channel.user_id if channel.remote else "")
+        want_call = bool(args.get("call"))
+        call_platform = str(args.get("call_platform") or "").strip().lower()
+        call_target = str(args.get("call_target") or "").strip()
+        reminder = service.add(
+            text, due, channel.kind if channel.remote else "", channel.user_id if channel.remote else "",
+            call=want_call, call_platform=call_platform, call_target=call_target,
+        )
+        if want_call:
+            plat = call_platform.title() if call_platform in ("discord", "telegram") else "Discord/Telegram"
+            return tr("Promemoria con chiamata su {plat} impostato {when}: {text}.").format(
+                plat=plat, when=reminder.when(), text=reminder.text
+            )
         return tr("Promemoria impostato {when}: {text}.").format(when=reminder.when(), text=reminder.text)
     if action == "list":
         items = service.list()
@@ -290,13 +308,16 @@ async def timer_tool(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "reminder",
-        "Promemoria: add (text + minutes o at 'HH:MM'), list, cancel.",
+        "Promemoria/appuntamenti: add (text + minutes o at 'HH:MM', opz. call=True su discord/telegram), list, cancel.",
         params(
             {
                 "action": {"type": "string", "enum": ["add", "list", "cancel"]},
                 "text": {"type": "string"},
                 "minutes": {"type": "number"},
                 "at": {"type": "string"},
+                "call": {"type": "boolean"},
+                "call_platform": {"type": "string", "enum": ["auto", "discord", "telegram"]},
+                "call_target": {"type": "string"},
                 "id": {"type": "string"},
             },
             ["action"],

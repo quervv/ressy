@@ -89,7 +89,7 @@ _RUNTIME_FILES = (
 )
 _READY_MARK = ".ressy-ok"
 
-IDLE_STOP_S = 10 * 60
+IDLE_STOP_S = 150
 START_TIMEOUT_S = 120
 
 LOCAL_TOOLS = (
@@ -98,7 +98,7 @@ LOCAL_TOOLS = (
     "pc_power", "set_clipboard", "type_text", "press_keys", "go_to_sleep", "api_usage", "web_answer", "wait",
 )
 LOCAL_TOOLS_FULL = LOCAL_TOOLS + (
-    "send_discord_message", "read_discord_chat", "write_in_app",
+    "call_phone", "send_discord_message", "read_discord_chat", "write_in_app",
     "create_file", "read_file", "list_folder", "file_action", "find_files",
     "edit_video", "download_file", "run_python",
     "read_screen", "click_text", "window_action", "mouse_action", "clipboard",
@@ -629,10 +629,11 @@ class LlamaServer:
         return self.process is not None and self.process.poll() is None
 
     def command(self, model: Path) -> list[str]:
-        threads = max(2, min(8, (os.cpu_count() or 4) - 1))
+        threads = max(2, min(6, (os.cpu_count() or 4) - 1))
         return [
             str(server_exe()), "-m", str(model), "--host", "127.0.0.1", "--port", str(self.port),
-            "-c", "4096", "-t", str(threads), "-np", "1", "--api-key", self.key,
+            "-c", "2048", "-b", "256", "-ub", "128", "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
+            "--no-warmup", "-t", str(threads), "-np", "1", "--api-key", self.key,
         ]
 
     def ensure(self, name: str) -> None:
