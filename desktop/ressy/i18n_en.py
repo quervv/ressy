@@ -2143,4 +2143,14 @@ EN: dict[str, str] = {
         'e.g. @username (optional, for calls)',
     'Contatto Telegram per chiamate':
         'Telegram contact for calls',
+    'Non vedo altri dispositivi attivi sulla rete Wi-Fi al momento. Dimmi l\'IP o il nome del dispositivo da chiamare.':
+        'I do not see other active devices on the Wi-Fi network right now. Tell me the IP or name of the device to call.',
+    'Quale dispositivo devo scegliere della tua rete?\n{devices}':
+        'Which device on your network should I choose?\n{devices}',
+    'Non trovo «{target}» sulla rete. Quale dispositivo devo scegliere della tua rete?\n{devices}':
+        'I cannot find «{target}» on the network. Which device on your network should I choose?\n{devices}',
+    'Non trovo il dispositivo «{target}» sulla rete Wi-Fi.':
+        'I cannot find the device «{target}» on the Wi-Fi network.',
+    'Chiamata Wi-Fi avviata verso {device}! Apri sul dispositivo: {url}':
+        'Wi-Fi call started to {device}! Open on the device: {url}',
 }

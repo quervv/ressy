@@ -806,6 +806,15 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     res = calls.call_phone(ctx, {"platform": "telegram", "recipient": "@marco_test", "reason": "Appuntamento"})
     assert "Chiamo @marco_test" in res and called == [("telegram", "@marco_test", "")]
 
+    monkeypatch.setattr(calls, "discover_lan_devices", lambda: [{"ip": "192.168.1.15", "name": "iPhone-Marco", "mac": "aa:bb:cc"}])
+    qw = quick.match("chiamami in wifi")
+    assert qw is not None and qw.tool == "call_phone" and qw.args["platform"] == "wifi"
+    with pytest.raises(Exception) as exc_wifi:
+        calls.call_phone(ctx, {"platform": "wifi"})
+    assert "iPhone-Marco" in str(exc_wifi.value) and "192.168.1.15" in str(exc_wifi.value)
+    wifi_ok = calls.call_phone(ctx, {"platform": "wifi", "recipient": "iPhone-Marco"})
+    assert "iPhone-Marco" in wifi_ok and "http://" in wifi_ok
+
     rem_svc = reminders.ReminderService(tmp_path / "rem.json", lambda *_a: None)
 
     async def _add_rem():

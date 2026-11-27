@@ -182,9 +182,159 @@ def _call_via_telegram(ctx: ToolContext, target: str) -> str:
     return tr("Sto chiamando {target} su Telegram!").format(target=target or tr("la chat aperta"))
 
 
+def _local_lan_ip() -> str:
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.168.1.1", 80))
+        return str(s.getsockname()[0])
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def discover_lan_devices(max_items: int = 12) -> list[dict[str, str]]:
+    import concurrent.futures
+    import socket
+
+    local_ip = _local_lan_ip()
+    prefix = ".".join(local_ip.split(".")[:3]) if local_ip.count(".") == 3 else ""
+
+    if prefix and not local_ip.startswith("127."):
+        def _probe(ip: str) -> None:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.08)
+            try:
+                sock.connect((ip, 80))
+            except OSError:
+                pass
+            finally:
+                sock.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+            list(pool.map(_probe, [f"{prefix}.{i}" for i in range(1, 255)], timeout=1.5))
+
+    devices: list[dict[str, str]] = []
+    seen_ips: set[str] = set()
+    try:
+        cmd = ["arp", "-a"]
+        kwargs: dict[str, Any] = {"capture_output": True, "timeout": 5}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = CREATE_NO_WINDOW
+        res = subprocess.run(cmd, **kwargs)
+        out = res.stdout.decode("utf-8", errors="replace")
+        for line in out.splitlines():
+            m = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F:-]{11,17}|[0-9a-fA-F:]{11,17})", line)
+            if not m:
+                continue
+            ip, mac = m.group(1), m.group(2)
+            if ip == local_ip or ip in seen_ips or ip.startswith(("224.", "239.", "255.", "127.")):
+                continue
+            if ip.endswith(".255") or mac.lower() in ("ff-ff-ff-ff-ff-ff", "ff:ff:ff:ff:ff:ff"):
+                continue
+            seen_ips.add(ip)
+            name = ""
+            try:
+                host, _, _ = socket.gethostbyaddr(ip)
+                if host and host != ip:
+                    name = host.split(".")[0]
+            except OSError:
+                pass
+            devices.append({"ip": ip, "name": name or ip, "mac": mac})
+            if len(devices) >= max_items:
+                break
+    except Exception:
+        log.debug("LAN device discovery failed", exc_info=True)
+    return devices
+
+
+_WIFI_CALL_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ressy Wi-Fi Call</title><style>
+body{margin:0;background:#0e1017;color:#f4f6fb;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#181b26;border:1px solid #2b3248;border-radius:20px;padding:28px;max-width:380px;width:90%;text-align:center;box-shadow:0 16px 40px #0008}
+h2{margin:0 0 8px;color:#3cebff}p{color:#b7c0d8;line-height:1.45}.badge{display:inline-block;padding:6px 14px;border-radius:999px;background:#1f3b36;color:#4df0b5;font-weight:600;margin-top:12px}
+</style></head><body><div class="card"><h2>Ressy Wi-Fi Call</h2><p id="msg">CONN</p><div class="badge">Connesso su Wi-Fi locale</div></div></body></html>"""
+
+_WIFI_SERVER_LOCK = __import__("threading").Lock()
+_WIFI_SERVER_URL = ""
+
+
+def _ensure_wifi_call_endpoint(reason: str) -> str:
+    import http.server
+    import threading
+
+    global _WIFI_SERVER_URL
+    with _WIFI_SERVER_LOCK:
+        if _WIFI_SERVER_URL:
+            return _WIFI_SERVER_URL
+        html = _WIFI_CALL_HTML.replace("CONN", reason or "Chiamata Wi-Fi attiva con Ressy").encode("utf-8")
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(html)))
+                self.end_headers()
+                self.wfile.write(html)
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        srv = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        _WIFI_SERVER_URL = f"http://{_local_lan_ip()}:{port}/"
+        return _WIFI_SERVER_URL
+
+
+def _call_via_wifi(ctx: ToolContext, target: str, reason: str) -> str:
+    devices = discover_lan_devices()
+    clean = (target or "").strip()
+    if not clean:
+        if not devices:
+            raise NeedsInputError(
+                tr("Non vedo altri dispositivi attivi sulla rete Wi-Fi al momento. Dimmi l'IP o il nome del dispositivo da chiamare.")
+            )
+        listing = "\n".join(
+            f"{i + 1}. {d['name']} ({d['ip']})" if d["name"] != d["ip"] else f"{i + 1}. {d['ip']}"
+            for i, d in enumerate(devices)
+        )
+        raise NeedsInputError(
+            tr("Quale dispositivo devo scegliere della tua rete?\n{devices}").format(devices=listing)
+        )
+
+    chosen = None
+    if clean.isdigit() and 1 <= int(clean) <= len(devices):
+        chosen = devices[int(clean) - 1]
+    else:
+        low = clean.lower()
+        chosen = next((d for d in devices if low in d["name"].lower() or low == d["ip"]), None)
+    if chosen is None and re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", clean):
+        chosen = {"ip": clean, "name": clean, "mac": ""}
+    if chosen is None:
+        if devices:
+            listing = "\n".join(f"{i + 1}. {d['name']} ({d['ip']})" for i, d in enumerate(devices))
+            raise NeedsInputError(
+                tr("Non trovo «{target}» sulla rete. Quale dispositivo devo scegliere della tua rete?\n{devices}").format(
+                    target=clean, devices=listing
+                )
+            )
+        raise NeedsInputError(tr("Non trovo il dispositivo «{target}» sulla rete Wi-Fi.").format(target=clean))
+
+    call_url = _ensure_wifi_call_endpoint(reason)
+    label = f"{chosen['name']} ({chosen['ip']})" if chosen["name"] != chosen["ip"] else chosen["ip"]
+    return tr("Chiamata Wi-Fi avviata verso {device}! Apri sul dispositivo: {url}").format(device=label, url=call_url)
+
+
 def _choose_platform(ctx: ToolContext, wanted: str) -> str:
     w = (wanted or "auto").strip().lower()
-    if w in ("discord", "telegram"):
+    if w in ("discord", "telegram", "wifi"):
         return w
     settings = getattr(ctx.services, "settings", None) if ctx.services else None
     if settings is not None:
@@ -244,6 +394,17 @@ def call_phone(ctx: ToolContext, args: dict) -> str:
     target = _resolve_target(ctx, platform, str(args.get("recipient") or ""))
     reason = str(args.get("reason") or "").strip()
 
+    if platform == "wifi":
+        msg = _call_via_wifi(ctx, str(args.get("recipient") or ""), reason)
+        if reason:
+            try:
+                loop = getattr(ctx.services, "loop", None) if ctx.services else None
+                if loop is not None and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(_send_urgent_remote_alert(ctx, "telegram", reason), loop).result(timeout=10)
+            except Exception:
+                pass
+        return msg
+
     if not target and platform == "telegram":
         raise NeedsInputError(
             tr("Dimmi il contatto o @username Telegram da chiamare (puoi anche salvarlo in Impostazioni › Da remoto).")
@@ -289,11 +450,11 @@ def call_phone(ctx: ToolContext, args: dict) -> str:
 TOOLS = [
     Tool(
         "call_phone",
-        "Chiama un contatto o l'utente su Discord o Telegram (app desktop + avviso vocale sul telefono) per appuntamenti o altro.",
+        "Chiama su Discord, Telegram o Wi-Fi locale (elenca i dispositivi in rete e chiede quale scegliere).",
         params(
             {
-                "platform": {"type": "string", "enum": ["auto", "discord", "telegram"]},
-                "recipient": {"type": "string", "description": "nome contatto o @username (vuoto = contatto salvato)"},
+                "platform": {"type": "string", "enum": ["auto", "discord", "telegram", "wifi"]},
+                "recipient": {"type": "string", "description": "contatto, @username, IP o dispositivo Wi-Fi"},
                 "reason": {"type": "string", "description": "motivo o promemoria della chiamata"},
             },
         ),

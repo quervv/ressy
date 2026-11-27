@@ -137,8 +137,8 @@ def build_signed_app(icon: Path) -> Path:
         site_pkgs = Path(site.getsitepackages()[-1])
     for item in site_pkgs.iterdir():
         low = item.name.lower()
-        if low.endswith((".dist-info", ".egg-info", ".pth")) or any(
-            low == p or low.startswith(p + "-") for p in _DEV_SKIP_PREFIXES
+        if low.endswith(".pth") or any(
+            low == p or low.startswith(p + "-") or low.startswith(p + "_") for p in _DEV_SKIP_PREFIXES
         ):
             continue
         dst = app_dir / item.name
@@ -151,7 +151,13 @@ def build_signed_app(icon: Path) -> Path:
     shutil.copytree(SERVER / "ressy_server", app_dir / "ressy_server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
     subprocess.run(
-        [str(target / "python.exe"), "-c", "import ressy, ressy.app, ressy.tools.calls, ressy.tools.video, ressy_server; print('SIGNED_APP_OK')"],
+        [
+            str(target / "python.exe"),
+            "-c",
+            "import ressy, ressy.app, ressy.tools.calls, ressy.tools.video, ressy_server, "
+            "pywhispercpp.model, webrtcvad, sounddevice, miniaudio, edge_tts, discord, telegram, "
+            "anthropic, httpx2, pynput; print('SIGNED_APP_OK')",
+        ],
         check=True,
         cwd=target,
     )

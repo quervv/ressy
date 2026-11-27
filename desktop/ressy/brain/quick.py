@@ -271,6 +271,17 @@ def match(text: str) -> Quick | None:
     if math_ans:
         return Quick(answer=math_ans)
 
+    wifi_call = re.fullmatch(
+        r"(?:chiamami|fammi una chiamata|fai una chiamata|chiama)(?:\s+in|\s+su|\s+sul)?\s+wi-?fi(?:\s+(?:a|su|verso)\s+(.+?))?(?:\s+(?:per|riguardo)\s+(.+))?",
+        t_no_colon,
+    )
+    if wifi_call:
+        args_w: dict[str, Any] = {"platform": "wifi"}
+        if wifi_call.group(1):
+            args_w["recipient"] = _preserve_case(raw, wifi_call.group(1).strip())
+        if wifi_call.group(2):
+            args_w["reason"] = _as_said(raw, wifi_call.group(2).strip())
+        return Quick("call_phone", args_w)
     call_me = re.fullmatch(
         r"(?:chiamami|fammi una chiamata|telefonami)(?:\s+su\s+(discord|telegram))?(?:\s+(?:per|a causa di|riguardo)\s+(.+))?",
         t_no_colon,

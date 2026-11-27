@@ -70,12 +70,13 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
 
 
-user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
-user32.SendInput.restype = wintypes.UINT
-user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
-user32.MapVirtualKeyW.restype = wintypes.UINT
-user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-user32.GetAsyncKeyState.restype = ctypes.c_short
+if sys.platform == "win32":
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+    user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+    user32.MapVirtualKeyW.restype = wintypes.UINT
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
 
 VK = {
     "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "invio": 0x0D, "return": 0x0D,
@@ -192,7 +193,7 @@ def wait_modifiers_released(timeout: float = 2.0) -> bool:
     return True
 
 
-WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM) if sys.platform == "win32" else None
 GW_OWNER = 4
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
@@ -209,62 +210,63 @@ DWMWA_CLOAKED = 14
 PM_NOREMOVE = 0x0000
 _MASK_KEY = 0xE8
 
-user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
-user32.EnumWindows.restype = wintypes.BOOL
-user32.IsWindowVisible.argtypes = [wintypes.HWND]
-user32.IsWindowVisible.restype = wintypes.BOOL
-user32.IsWindow.argtypes = [wintypes.HWND]
-user32.IsWindow.restype = wintypes.BOOL
-user32.IsIconic.argtypes = [wintypes.HWND]
-user32.IsIconic.restype = wintypes.BOOL
-user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
-user32.GetWindow.restype = wintypes.HWND
-user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-user32.GetWindowLongW.restype = wintypes.LONG
-user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-user32.GetWindowTextLengthW.restype = ctypes.c_int
-user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-user32.GetWindowTextW.restype = ctypes.c_int
-user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-user32.GetClassNameW.restype = ctypes.c_int
-user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-user32.GetWindowRect.restype = wintypes.BOOL
-user32.GetForegroundWindow.argtypes = []
-user32.GetForegroundWindow.restype = wintypes.HWND
-user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-user32.SetForegroundWindow.restype = wintypes.BOOL
-user32.BringWindowToTop.argtypes = [wintypes.HWND]
-user32.BringWindowToTop.restype = wintypes.BOOL
-user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-user32.ShowWindow.restype = wintypes.BOOL
-user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                ctypes.c_int, wintypes.UINT]
-user32.SetWindowPos.restype = wintypes.BOOL
-user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
-user32.AttachThreadInput.restype = wintypes.BOOL
-user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-user32.PostMessageW.restype = wintypes.BOOL
-user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
-                                wintypes.UINT]
-user32.PeekMessageW.restype = wintypes.BOOL
-user32.LockWorkStation.argtypes = []
-user32.LockWorkStation.restype = wintypes.BOOL
-user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-user32.OpenInputDesktop.restype = wintypes.HANDLE
-user32.CloseDesktop.argtypes = [wintypes.HANDLE]
-user32.CloseDesktop.restype = wintypes.BOOL
-user32.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
-                                             ctypes.POINTER(wintypes.DWORD)]
-user32.GetUserObjectInformationW.restype = wintypes.BOOL
-kernel32.GetCurrentThreadId.argtypes = []
-kernel32.GetCurrentThreadId.restype = wintypes.DWORD
-kernel32.GetCurrentProcessId.argtypes = []
-kernel32.GetCurrentProcessId.restype = wintypes.DWORD
-if dwmapi is not None:
-    dwmapi.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD]
-    dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
+if sys.platform == "win32":
+    user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.IsIconic.restype = wintypes.BOOL
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetWindowLongW.restype = wintypes.LONG
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.BringWindowToTop.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+    user32.AttachThreadInput.restype = wintypes.BOOL
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.PostMessageW.restype = wintypes.BOOL
+    user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
+                                    wintypes.UINT]
+    user32.PeekMessageW.restype = wintypes.BOOL
+    user32.LockWorkStation.argtypes = []
+    user32.LockWorkStation.restype = wintypes.BOOL
+    user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    user32.OpenInputDesktop.restype = wintypes.HANDLE
+    user32.CloseDesktop.argtypes = [wintypes.HANDLE]
+    user32.CloseDesktop.restype = wintypes.BOOL
+    user32.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+                                                 ctypes.POINTER(wintypes.DWORD)]
+    user32.GetUserObjectInformationW.restype = wintypes.BOOL
+    kernel32.GetCurrentThreadId.argtypes = []
+    kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+    kernel32.GetCurrentProcessId.argtypes = []
+    kernel32.GetCurrentProcessId.restype = wintypes.DWORD
+    if dwmapi is not None:
+        dwmapi.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD]
+        dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
 
 
 @dataclass(frozen=True)
@@ -504,26 +506,27 @@ def input_desktop_available() -> bool:
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 
-kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
-kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
-kernel32.GlobalLock.restype = wintypes.LPVOID
-kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
-kernel32.GlobalUnlock.restype = wintypes.BOOL
-kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
-kernel32.GlobalFree.restype = wintypes.HGLOBAL
-user32.OpenClipboard.argtypes = [wintypes.HWND]
-user32.OpenClipboard.restype = wintypes.BOOL
-user32.CloseClipboard.argtypes = []
-user32.CloseClipboard.restype = wintypes.BOOL
-user32.EmptyClipboard.argtypes = []
-user32.EmptyClipboard.restype = wintypes.BOOL
-user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
-user32.SetClipboardData.restype = wintypes.HANDLE
-user32.GetClipboardData.argtypes = [wintypes.UINT]
-user32.GetClipboardData.restype = wintypes.HANDLE
-user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
-user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+if sys.platform == "win32":
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = wintypes.LPVOID
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalFree.restype = wintypes.HGLOBAL
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.argtypes = []
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+    user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
 
 
 def _open_clipboard() -> None:
@@ -595,11 +598,12 @@ class GUID(ctypes.Structure):
     ]
 
 
-shell32.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE,
-                                         ctypes.POINTER(ctypes.c_wchar_p)]
-shell32.SHGetKnownFolderPath.restype = ctypes.c_long
-ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
-ole32.CoTaskMemFree.restype = None
+if sys.platform == "win32":
+    shell32.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE,
+                                             ctypes.POINTER(ctypes.c_wchar_p)]
+    shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    ole32.CoTaskMemFree.restype = None
 
 KNOWN_FOLDERS = {
     "desktop": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641",
@@ -643,12 +647,13 @@ SYNCHRONIZE = 0x00100000
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WAIT_TIMEOUT = 0x102
-kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-kernel32.OpenProcess.restype = wintypes.HANDLE
-kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-kernel32.CloseHandle.restype = wintypes.BOOL
-user32.WaitForInputIdle.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-user32.WaitForInputIdle.restype = wintypes.DWORD
+if sys.platform == "win32":
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    user32.WaitForInputIdle.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    user32.WaitForInputIdle.restype = wintypes.DWORD
 
 
 def wait_input_idle(pid: int, timeout: float = 5.0) -> bool:
@@ -683,8 +688,9 @@ FOF_SILENT = 0x0004
 FOF_NOCONFIRMATION = 0x0010
 FOF_ALLOWUNDO = 0x0040
 FOF_NOERRORUI = 0x0400
-shell32.SHFileOperationW.argtypes = [ctypes.POINTER(SHFILEOPSTRUCTW)]
-shell32.SHFileOperationW.restype = ctypes.c_int
+if sys.platform == "win32":
+    shell32.SHFileOperationW.argtypes = [ctypes.POINTER(SHFILEOPSTRUCTW)]
+    shell32.SHFileOperationW.restype = ctypes.c_int
 
 
 def recycle(path: str) -> bool:
@@ -698,8 +704,9 @@ def recycle(path: str) -> bool:
 SHERB_NOCONFIRMATION = 0x00000001
 SHERB_NOPROGRESSUI = 0x00000002
 SHERB_NOSOUND = 0x00000004
-shell32.SHEmptyRecycleBinW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.DWORD]
-shell32.SHEmptyRecycleBinW.restype = ctypes.c_long
+if sys.platform == "win32":
+    shell32.SHEmptyRecycleBinW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.DWORD]
+    shell32.SHEmptyRecycleBinW.restype = ctypes.c_long
 
 
 def empty_recycle_bin() -> bool:
