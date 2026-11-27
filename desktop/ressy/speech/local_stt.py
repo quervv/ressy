@@ -97,7 +97,7 @@ def delete_other_models(keep: str) -> None:
             model_path(name).unlink(missing_ok=True)
 
 
-IDLE_UNLOAD_S = 180.0
+IDLE_UNLOAD_S = 45.0
 
 
 class LocalWhisper:
@@ -117,7 +117,7 @@ class LocalWhisper:
         self._idle_timer = timer
 
     def release(self) -> None:
-        import gc
+        from ..paths import trim_memory
 
         with self._lock:
             if self._idle_timer is not None:
@@ -126,7 +126,7 @@ class LocalWhisper:
             if self._model is not None:
                 self._model = None
                 self._name = ""
-                gc.collect()
+                trim_memory()
                 log.info("speech model unloaded to free RAM")
 
     def _load(self, name: str) -> Any:

@@ -760,6 +760,7 @@ def test_ram_av_cleanup_calling_mic_dsp_and_video_overhaul(settings, tmp_path, m
     assert "-ctv" in cmd and "--no-warmup" in cmd
     assert cmd[cmd.index("-c") + 1] == "2048"
     assert local_llm.IDLE_STOP_S <= 180
+    assert local_stt.IDLE_UNLOAD_S <= 60.0
 
     lw = local_stt.LocalWhisper()
     lw._model = object()

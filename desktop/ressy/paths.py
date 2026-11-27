@@ -90,11 +90,25 @@ def ensure_dirs() -> None:
 
 def _is_embedded_app() -> bool:
     exe = Path(sys.executable)
-    return exe.name.lower() in ("pythonw.exe", "python.exe") and (exe.parent / "app" / "ressy").is_dir()
+    return exe.name.lower() in ("pythonw.exe", "python.exe", "ressy.exe") and (exe.parent / "app" / "ressy").is_dir()
 
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False)) or _is_embedded_app()
+
+
+def trim_memory() -> None:
+    import gc
+
+    gc.collect()
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=False)
+            k32.SetProcessWorkingSetSize(k32.GetCurrentProcess(), ctypes.c_size_t(-1), ctypes.c_size_t(-1))
+        except Exception:
+            pass
 
 
 def resource_path(relative: str) -> Path:
@@ -108,6 +122,9 @@ def resource_path(relative: str) -> Path:
 def launch_command() -> list[str]:
     if _is_embedded_app():
         exe = Path(sys.executable)
+        ressy_exe = exe.with_name("Ressy.exe")
+        if ressy_exe.is_file():
+            return [str(ressy_exe)]
         pythonw = exe.with_name("pythonw.exe")
         return [str(pythonw if pythonw.exists() else exe), "-m", "ressy"]
     if getattr(sys, "frozen", False):

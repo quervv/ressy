@@ -63,10 +63,13 @@ def _reg_set(key_path: str, name: str, value: str | int | None) -> None:
 
 
 def runtime_exe(install_dir: Path) -> Path:
+    ressy_exe = install_dir / APP_EXE
+    if ressy_exe.is_file():
+        return ressy_exe
     pyw = install_dir / "pythonw.exe"
     if pyw.is_file() and (install_dir / "app" / "ressy").is_dir():
         return pyw
-    return install_dir / APP_EXE
+    return ressy_exe
 
 
 def runtime_cmd(install_dir: Path, *extra: str) -> list[str]:

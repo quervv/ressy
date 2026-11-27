@@ -150,6 +150,62 @@ def build_signed_app(icon: Path) -> Path:
     shutil.copytree(DESKTOP / "ressy", app_dir / "ressy", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copytree(SERVER / "ressy_server", app_dir / "ressy_server", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
+    csc = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    if sys.platform == "win32" and csc.is_file():
+        from ressy import __version__
+
+        ver_parts = [p for p in __version__.split(".")[:3] if p.isdigit()]
+        while len(ver_parts) < 4:
+            ver_parts.append("0")
+        ver_quad = ".".join(ver_parts)
+        host_cs = BUILD / "RessyHost.cs"
+        host_cs.write_text(
+            f"""using System;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
+
+[assembly: AssemblyTitle("Ressy")]
+[assembly: AssemblyDescription("Ressy - Assistente Vocale AI")]
+[assembly: AssemblyProduct("Ressy")]
+[assembly: AssemblyCompany("Ressy Project")]
+[assembly: AssemblyVersion("{ver_quad}")]
+[assembly: AssemblyFileVersion("{ver_quad}")]
+
+static class Program {{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool SetDllDirectory(string lpPathName);
+
+    [DllImport("python312.dll", CallingConvention = CallingConvention.Cdecl)]
+    static extern int Py_Main(int argc, IntPtr[] argv);
+
+    [STAThread]
+    static int Main(string[] args) {{
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        SetDllDirectory(baseDir);
+        var pyArgs = new string[args.Length + 3];
+        pyArgs[0] = Path.Combine(baseDir, "Ressy.exe");
+        pyArgs[1] = "-m";
+        pyArgs[2] = "ressy";
+        Array.Copy(args, 0, pyArgs, 3, args.Length);
+        IntPtr[] ptrs = new IntPtr[pyArgs.Length];
+        for (int i = 0; i < pyArgs.Length; i++)
+            ptrs[i] = Marshal.StringToHGlobalUni(pyArgs[i]);
+        try {{
+            return Py_Main(ptrs.Length, ptrs);
+        }} finally {{
+            for (int i = 0; i < ptrs.Length; i++) Marshal.FreeHGlobal(ptrs[i]);
+        }}
+    }}
+}}
+""",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [str(csc), "/nologo", "/platform:x64", "/target:winexe", "/optimize+", f"/win32icon:{icon}", f"/out:{target / 'Ressy.exe'}", str(host_cs)],
+            check=True,
+        )
+
     subprocess.run(
         [
             str(target / "python.exe"),

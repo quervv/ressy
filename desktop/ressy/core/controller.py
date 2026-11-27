@@ -272,7 +272,9 @@ class Controller:
         ]
         refresh = asyncio.ensure_future(asyncio.to_thread(self.apps.ensure_fresh))
         refresh.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
-        asyncio.ensure_future(asyncio.to_thread(self._preload_stt))
+        from ..paths import trim_memory
+
+        asyncio.get_running_loop().call_later(4.0, trim_memory)
         if self.settings.llm_provider == "local" and self.settings.local_llm_ready():
             asyncio.ensure_future(asyncio.to_thread(self._preload_local_ai))
 
@@ -730,6 +732,9 @@ class Controller:
         self.speaker.interrupt()
         self.ui.status("")
         self.ui.hide_hud()
+        from ..paths import trim_memory
+
+        trim_memory()
         self._set_state(ASLEEP if self._mode != "ptt" else HEARING)
         if cue:
             self._play_cue("sleep")
